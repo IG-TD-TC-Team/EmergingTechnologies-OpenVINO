@@ -464,6 +464,47 @@ Idle ◄──────────────────── mic button 
 
 ---
 
+## API Migration Guide
+
+### What was done now to prepare
+
+| What | File | Why |
+|---|---|---|
+| Centralized storage keys | `src/constants/storageKeys.js` | One place to update when keys move to the API |
+| `SessionService` | `src/services/SessionService.js` | **Only this file changes** when the API arrives — Presenters stay untouched |
+| Presenters use `SessionService` | `LoadingPresenter`, `ModeSelectionPresenter` | No direct `AsyncStorage` calls in business logic |
+
+### When the API arrives — what to change
+
+**`SessionService.js` is the single migration point.** Replace each method body:
+
+| Method | v1 (local) | vFuture (API) |
+|---|---|---|
+| `getNurseName()` | `AsyncStorage.getItem(...)` | `GET /auth/me → response.nurse_name` |
+| `saveNurseName()` | `AsyncStorage.setItem(...)` | `PATCH /auth/profile { nurse_name }` |
+| `getActiveShift()` | `AsyncStorage.getItem(...)` | `GET /sessions/active` |
+| `startShift()` | `AsyncStorage.setItem(...)` | `POST /sessions { nurse_name, started_at }` |
+| `endShift()` | `AsyncStorage.removeItem(...)` | `DELETE /sessions/:id` |
+
+No Presenter or Screen needs to change.
+
+### Known gaps — to address before API integration
+
+These are conscious shortcuts made in v1 that will need attention before connecting a backend:
+
+1. **No `AuthService`** — The logout button is reserved for future auth but there is no auth interface yet. When auth arrives (SSO, JWT, hospital directory), create `src/services/AuthService.js` and wire it to the logout button in `ModeSelectionScreen`.
+
+2. **No `Repository` layer implemented** — The architecture plans a Repository layer (Adapter pattern for SQLite/IndexedDB) but it is not built yet. All data is going through `SessionService` directly for now. Build repositories when the Dashboard and patient data features are implemented.
+
+3. **Session object is minimal** — `startShift()` currently stores only `nurse_name` and `started_at`. The future API will expect more fields (device ID, app version, shift type, etc.). Extend the session object in `SessionService.startShift()` before the API integration.
+
+4. **No token storage** — When the API introduces JWT or session tokens, a secure storage solution is needed. Do **not** store tokens in `AsyncStorage` (not encrypted). Use `expo-secure-store` instead.
+   ```bash
+   npx expo install expo-secure-store
+   ```
+
+---
+
 ## Useful Links
 
 - [React Native Docs](https://reactnative.dev/docs/getting-started)

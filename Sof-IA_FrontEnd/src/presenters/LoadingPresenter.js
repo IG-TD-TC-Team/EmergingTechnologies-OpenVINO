@@ -1,12 +1,9 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
-
-const ACTIVE_SHIFT_KEY = 'active_shift';
-const NURSE_NAME_KEY = 'nurse_name';
+import SessionService from '../services/SessionService';
 
 /**
  * LoadingPresenter
  * MVP Presenter — handles the startup routing decision (US #23).
- * Checks for an active shift and navigates accordingly.
+ * Checks for an active shift via SessionService and navigates accordingly.
  * No React Native imports.
  */
 class LoadingPresenter {
@@ -16,19 +13,16 @@ class LoadingPresenter {
 
   async checkSessionAndNavigate(navigation) {
     try {
-      const [activeShift, nurseName] = await Promise.all([
-        AsyncStorage.getItem(ACTIVE_SHIFT_KEY),
-        AsyncStorage.getItem(NURSE_NAME_KEY),
-      ]);
+      const hasShift = await SessionService.hasActiveShift();
 
-      if (activeShift) {
+      if (hasShift) {
         // US #23 — resume active shift, skip Mode Selection
         navigation.replace('Dashboard');
       } else {
         navigation.replace('ModeSelection');
       }
     } catch (e) {
-      // Storage failure — default to Mode Selection
+      // Service failure — default to Mode Selection
       navigation.replace('ModeSelection');
     }
   }

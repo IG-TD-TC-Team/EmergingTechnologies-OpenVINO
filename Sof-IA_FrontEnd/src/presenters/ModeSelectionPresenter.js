@@ -1,11 +1,9 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
-
-const NURSE_NAME_KEY = 'nurse_name';
+import SessionService from '../services/SessionService';
 
 /**
  * ModeSelectionPresenter
  * MVP Presenter — no React Native imports, pure business logic.
- * The View binds to this via the methods below.
+ * All session and identity operations go through SessionService.
  */
 class ModeSelectionPresenter {
   constructor(view) {
@@ -14,20 +12,13 @@ class ModeSelectionPresenter {
 
   async loadNurseName() {
     try {
-      const name = await AsyncStorage.getItem(NURSE_NAME_KEY);
+      const name = await SessionService.getNurseName();
       if (name) {
         this.view.setNurseName(name);
+        this.view.setCanStart(true);
       }
     } catch (e) {
-      // local storage failure — continue with empty name
-    }
-  }
-
-  async saveNurseName(name) {
-    try {
-      await AsyncStorage.setItem(NURSE_NAME_KEY, name.trim());
-    } catch (e) {
-      // silent — name is UI-only in v1
+      // Service failure — continue with empty name
     }
   }
 
@@ -37,8 +28,14 @@ class ModeSelectionPresenter {
   }
 
   async onStartWorking(name, navigation) {
-    await this.saveNurseName(name);
-    navigation.navigate('Dashboard');
+    try {
+      await SessionService.saveNurseName(name);
+      await SessionService.startShift(name);
+      navigation.navigate('Dashboard');
+    } catch (e) {
+      // Service failure — navigate anyway, shift state non-critical in v1
+      navigation.navigate('Dashboard');
+    }
   }
 
   onFirstSteps() {

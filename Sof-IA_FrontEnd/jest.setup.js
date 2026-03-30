@@ -3,15 +3,20 @@
  * Configures the test environment before running tests
  */
 
-// Mock AsyncStorage
-jest.mock('@react-native-async-storage/async-storage', () =>
-  require('@react-native-async-storage/async-storage/jest/async-storage-mock')
-);
+// Mock React Native completely
+jest.mock('react-native', () => ({
+  Platform: {
+    OS: 'web',
+    select: jest.fn((obj) => obj.web || obj.default),
+  },
+}));
 
-// Mock React Native Platform
-jest.mock('react-native/Libraries/Utilities/Platform', () => ({
-  OS: 'ios',
-  select: jest.fn((obj) => obj.ios),
+// Mock AsyncStorage
+jest.mock('@react-native-async-storage/async-storage', () => ({
+  getItem: jest.fn(),
+  setItem: jest.fn(),
+  removeItem: jest.fn(),
+  clear: jest.fn(),
 }));
 
 // Setup fake-indexeddb for web adapter tests
@@ -22,6 +27,7 @@ global.IDBKeyRange = IDBKeyRange;
 // Mock expo-sqlite for native adapter tests
 jest.mock('expo-sqlite', () => ({
   openDatabaseAsync: jest.fn(),
+  openDatabaseSync: jest.fn(),
 }));
 
 // Suppress console logs during tests (optional)

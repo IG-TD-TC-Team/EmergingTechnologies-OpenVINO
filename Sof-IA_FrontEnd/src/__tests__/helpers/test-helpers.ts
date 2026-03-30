@@ -21,14 +21,20 @@ export function createTestSession(overrides?: Partial<Session>): Session {
 
   return {
     id: uuidv4(),
-    user_id: 'test-user-123',
-    shift_mode: 'urgencia',
+    session_id: `session_${Date.now()}`,
+    nurse_name: 'Test Nurse',
     started_at: now,
     ended_at: null,
+    status: 'active' as any,
+    device_id: 'test-device',
+    app_version: '1.0.0',
+    patient_count: 0,
+    total_recording_duration: 0,
+    synced: false,
+    last_synced_at: null,
     created_at: now,
     updated_at: now,
     expires_at: expiresAt,
-    synced: false,
     ...overrides,
   };
 }

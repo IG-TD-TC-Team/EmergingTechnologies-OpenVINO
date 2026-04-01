@@ -6,15 +6,24 @@
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "test:integration": "jest integration",
+    "test:dexie": "jest dexie.integration",
+    "test:sqlite": "jest sqlite.integration",
+    "test:factory": "jest storage-factory"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-navigation/native": "^7.1.33",
     "@react-navigation/stack": "^7.8.5",
+    "dexie": "^4.3.0",
     "expo": "~55.0.7",
     "expo-av": "^16.0.8",
     "expo-linking": "~55.0.9",
+    "expo-sqlite": "^55.0.11",
     "expo-status-bar": "~55.0.4",
     "memoize-one": "^6.0.0",
     "react": "19.2.0",
@@ -23,7 +32,23 @@
     "react-native-safe-area-context": "~5.6.2",
     "react-native-screens": "~4.23.0",
     "react-native-svg": "15.15.3",
-    "react-native-web": "^0.21.0"
+    "react-native-web": "^0.21.0",
+    "uuid": "^13.0.0"
   },
-  "private": true
+  "private": true,
+  "devDependencies": {
+    "@babel/preset-env": "^7.29.2",
+    "@babel/preset-typescript": "^7.28.5",
+    "@testing-library/jest-native": "^5.4.3",
+    "@testing-library/react-native": "^13.3.3",
+    "@types/jest": "^30.0.0",
+    "@types/react": "~19.2.10",
+    "babel-jest": "^30.3.0",
+    "babel-preset-expo": "^55.0.13",
+    "fake-indexeddb": "^6.2.5",
+    "jest": "^30.3.0",
+    "jest-expo": "^55.0.11",
+    "ts-jest": "^29.4.6",
+    "typescript": "~5.9.2"
+  }
 }

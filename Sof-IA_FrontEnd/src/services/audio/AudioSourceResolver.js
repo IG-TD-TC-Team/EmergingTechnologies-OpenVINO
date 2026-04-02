@@ -9,7 +9,7 @@
  *   - On Web: always built-in (no USB detection API)
  */
 
-import { Platform } from 'react-native';
+import { capabilities } from '../../config/capabilities';
 import USBMicStrategy from './USBMicStrategy';
 import DeviceMicStrategy from './DeviceMicStrategy';
 
@@ -22,7 +22,7 @@ const AudioSourceResolver = {
      * Respects manual override if the selected source is still available.
      */
     async resolve() {
-        if (Platform.OS === 'web') return DeviceMicStrategy;
+        if (capabilities.isWeb) return DeviceMicStrategy;
 
         const usbAvailable = await USBMicStrategy.isAvailable();
 
@@ -59,7 +59,7 @@ const AudioSourceResolver = {
 
     /** Returns available sources so the UI can show what's selectable. */
     async getAvailableSources() {
-        if (Platform.OS === 'web') return [DeviceMicStrategy];
+        if (capabilities.isWeb) return [DeviceMicStrategy];
         const usbAvailable = await USBMicStrategy.isAvailable();
         return usbAvailable
             ? [USBMicStrategy, DeviceMicStrategy]

@@ -14,13 +14,29 @@ import * as SQLite from 'expo-sqlite';
 import { v4 as uuidv4 } from 'uuid';
 import { IRepository, WhereClause } from '../../interfaces/IRepository';
 import { initializeDatabase } from './migrations';
+import { capabilities } from '../../../config/capabilities';
 
 export class SqliteAdapter implements IRepository {
   private db: SQLite.SQLiteDatabase;
   private initialized: boolean = false;
 
   constructor(databaseName: string = 'sofia.db') {
-    this.db = SQLite.openDatabaseSync(databaseName);
+    // Defensive check: Only instantiate on native platforms
+    if (!capabilities.isNative) {
+      throw new Error(
+        '[SqliteAdapter] Cannot initialize SQLite on web platform. ' +
+        'This adapter is only supported on Android/iOS. ' +
+        'Use DexieAdapter for web instead.'
+      );
+    }
+
+    try {
+      this.db = SQLite.openDatabaseSync(databaseName);
+    } catch (error) {
+      throw new Error(
+        `[SqliteAdapter] Failed to open database: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
   }
 
   /**

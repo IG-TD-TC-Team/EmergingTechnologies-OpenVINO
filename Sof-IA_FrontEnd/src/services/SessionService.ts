@@ -19,11 +19,11 @@
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Platform } from 'react-native';
 import { v4 as uuidv4 } from 'uuid';
 import { getStorage } from '../repositories';
 import { Session, SessionStatus } from '../models/Session';
 import StorageKeys from '../constants/storageKeys';
+import { capabilities } from '../config/capabilities';
 
 class SessionService {
   // Cache for active session to reduce database queries
@@ -305,7 +305,7 @@ class SessionService {
 
       if (!deviceId) {
         // Generate new device ID
-        const platform = Platform.OS;
+        const platform = capabilities.platform;
         const uniqueId = uuidv4().substring(0, 8);
         deviceId = `${platform}_${uniqueId}`;
 
@@ -317,7 +317,7 @@ class SessionService {
     } catch (error) {
       console.error('[SessionService] Failed to get device ID:', error);
       // Fallback to platform + random ID
-      return `${Platform.OS}_${uuidv4().substring(0, 8)}`;
+      return `${capabilities.platform}_${uuidv4().substring(0, 8)}`;
     }
   }
 

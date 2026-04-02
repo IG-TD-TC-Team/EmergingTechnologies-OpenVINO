@@ -11,11 +11,10 @@
  *   'blocked'      — permanently denied, must open OS Settings
  *
  * Requires: npx expo install expo-av expo-linking
+ * Note: Uses dynamic imports to avoid build errors on web
  */
 
-import { Platform } from 'react-native';
-import { Audio } from 'expo-av';
-import * as Linking from 'expo-linking';
+import { capabilities } from '../config/capabilities';
 
 function mapExpoStatus(status, canAskAgain) {
     if (status === 'granted') return 'granted';
@@ -26,16 +25,32 @@ function mapExpoStatus(status, canAskAgain) {
 const PermissionsService = {
     /** Check current status WITHOUT prompting. Call on launch and foreground. */
     async check() {
-        if (Platform.OS === 'web') return 'granted';
-        const { status, canAskAgain } = await Audio.getPermissionsAsync();
-        return mapExpoStatus(status, canAskAgain);
+        if (capabilities.isWeb) return 'granted';
+
+        try {
+            // Dynamic import to avoid bundling expo-av on web
+            const { Audio } = await import('expo-av');
+            const { status, canAskAgain } = await Audio.getPermissionsAsync();
+            return mapExpoStatus(status, canAskAgain);
+        } catch (error) {
+            console.error('[PermissionsService] Failed to check permissions:', error);
+            return 'undetermined';
+        }
     },
 
     /** Show the native Android permission dialog. */
     async request() {
-        if (Platform.OS === 'web') return 'granted';
-        const { status, canAskAgain } = await Audio.requestPermissionsAsync();
-        return mapExpoStatus(status, canAskAgain);
+        if (capabilities.isWeb) return 'granted';
+
+        try {
+            // Dynamic import to avoid bundling expo-av on web
+            const { Audio } = await import('expo-av');
+            const { status, canAskAgain } = await Audio.requestPermissionsAsync();
+            return mapExpoStatus(status, canAskAgain);
+        } catch (error) {
+            console.error('[PermissionsService] Failed to request permissions:', error);
+            return 'denied';
+        }
     },
 
     /**
@@ -53,7 +68,20 @@ const PermissionsService = {
 
     /** Deep-link to Android app settings (for permanently blocked state). */
     async openSettings() {
-        await Linking.openSettings();
+        // Web doesn't have system settings to open
+        if (capabilities.isWeb) {
+            console.warn('[PermissionsService] openSettings() not available on web platform');
+            return;
+        }
+
+        try {
+            // Dynamic import to avoid bundling expo-linking on web
+            const Linking = await import('expo-linking');
+            await Linking.openSettings();
+        } catch (error) {
+            console.error('[PermissionsService] Failed to open settings:', error);
+            throw new Error('Failed to open system settings');
+        }
     },
 };
 

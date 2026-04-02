@@ -10,11 +10,12 @@
  * const repository = await RepositoryFactory.create();
  * // Now use repository.create(), repository.read(), etc.
  * ```
+ *
+ * Note: Uses dynamic imports to avoid bundling native modules on web
  */
 
-import { Platform } from 'react-native';
+import { capabilities } from '../../config/capabilities';
 import { IRepository } from '../interfaces/IRepository';
-import { SqliteAdapter } from './sqlite/SqliteAdapter';
 import { DexieAdapter } from './dexie/DexieAdapter';
 
 export class RepositoryFactory {
@@ -29,7 +30,7 @@ export class RepositoryFactory {
       return this.instance;
     }
 
-    const adapter = this.createAdapter();
+    const adapter = await this.createAdapter();
     await adapter.initialize();
 
     this.instance = adapter;
@@ -38,9 +39,10 @@ export class RepositoryFactory {
 
   /**
    * Create adapter based on current platform
+   * Uses dynamic import for SqliteAdapter to avoid bundling on web
    */
-  private static createAdapter(): IRepository {
-    const platform = Platform.OS;
+  private static async createAdapter(): Promise<IRepository> {
+    const platform = capabilities.platform;
 
     console.log(`[RepositoryFactory] Detected platform: ${platform}`);
 
@@ -48,6 +50,8 @@ export class RepositoryFactory {
       case 'android':
       case 'ios':
         console.log('[RepositoryFactory] Using SqliteAdapter');
+        // Dynamic import to avoid bundling expo-sqlite on web
+        const { SqliteAdapter } = await import('./sqlite/SqliteAdapter');
         return new SqliteAdapter();
 
       case 'web':

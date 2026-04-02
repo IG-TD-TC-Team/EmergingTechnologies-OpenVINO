@@ -3,9 +3,11 @@
  *
  * Strategy for USB-C microphone (e.g. Rode Wireless Mini).
  * Detects whether a USB audio device is currently connected.
+ *
+ * Note: Uses dynamic import for expo-av to avoid build errors on web
  */
 
-import { Audio } from 'expo-av';
+import { capabilities } from '../../config/capabilities';
 
 const USB_KEYWORDS = ['usb', 'rode', 'wireless mini', 'headset', 'external'];
 
@@ -21,10 +23,18 @@ const USBMicStrategy = {
      * Always returns false on Web (no USB detection API).
      */
     async isAvailable() {
+        // Web doesn't have USB audio device detection API
+        if (!capabilities.isNative) {
+            return false;
+        }
+
         try {
+            // Dynamic import to avoid bundling expo-av on web
+            const { Audio } = await import('expo-av');
             const inputs = await Audio.getAvailableInputsAsync();
             return inputs.some(isUsbDevice);
-        } catch {
+        } catch (error) {
+            console.warn('[USBMicStrategy] Failed to check USB availability:', error);
             return false;
         }
     },

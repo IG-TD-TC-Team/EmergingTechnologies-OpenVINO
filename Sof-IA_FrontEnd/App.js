@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import AppNavigator from './src/navigation/AppNavigator';
 import { StorageFactory, LogLevel } from './src/repositories/adapters';
+import { CapabilitiesProvider } from './src/config/CapabilitiesContext';
 
 export default function App() {
   const [isStorageReady, setIsStorageReady] = useState(false);
@@ -56,10 +57,10 @@ export default function App() {
   }
 
   return (
-    <>
+    <CapabilitiesProvider>
       <AppNavigator />
       <StatusBar style="auto" />
-    </>
+    </CapabilitiesProvider>
   );
 }
 

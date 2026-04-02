@@ -3,12 +3,27 @@
  * Configures the test environment before running tests
  */
 
-// Mock React Native completely
+// Mock React Native components and APIs
 jest.mock('react-native', () => ({
   Platform: {
     OS: 'web',
     select: jest.fn((obj) => obj.web || obj.default),
   },
+  StyleSheet: {
+    create: (styles) => styles,
+    flatten: (styles) => styles,
+  },
+  View: 'View',
+  Text: 'Text',
+  TextInput: 'TextInput',
+  TouchableOpacity: 'TouchableOpacity',
+  ScrollView: 'ScrollView',
+  SafeAreaView: 'SafeAreaView',
+  Switch: 'Switch',
+  Alert: {
+    alert: jest.fn(),
+  },
+  ActivityIndicator: 'ActivityIndicator',
 }));
 
 // Mock AsyncStorage
@@ -28,6 +43,14 @@ global.IDBKeyRange = IDBKeyRange;
 jest.mock('expo-sqlite', () => ({
   openDatabaseAsync: jest.fn(),
   openDatabaseSync: jest.fn(),
+}));
+
+// Mock react-native-svg
+jest.mock('react-native-svg', () => ({
+  SvgXml: 'SvgXml',
+  Svg: 'Svg',
+  Circle: 'Circle',
+  Path: 'Path',
 }));
 
 // Suppress console logs during tests (optional)

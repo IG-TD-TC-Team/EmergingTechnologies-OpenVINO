@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>JSDoc: Source: api.js</title>
+
+    <script src="scripts/prettify/prettify.js"> </script>
+    <script src="scripts/prettify/lang-css.js"> </script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <link type="text/css" rel="stylesheet" href="styles/prettify-tomorrow.css">
+    <link type="text/css" rel="stylesheet" href="styles/jsdoc-default.css">
+</head>
+
+<body>
+
+<div id="main">
+
+    <h1 class="page-title">Source: api.js</h1>
+
+    
+
+
+
+    
+    <section>
+        <article>
+            <pre class="prettyprint source linenums"><code>/**
+ * @fileoverview Pure HTTP service layer for the OpenVino Benchmark API.
+ *
+ * All communication with the FastAPI backend is centralised here.
+ * No framework dependency — this module uses only the native `fetch` API
+ * and the browser's built-in `EventSource`.
+ *
+ * Exposed as the global constant {@link API}.
+ *
+ * @module api
+ */
+
+/**
+ * @typedef {Object} ModelMeta
+ * @property {string}  id      - Registry key, e.g. `"phi3_pytorch"`.
+ * @property {string}  label   - Human-readable display name.
+ * @property {string}  type    - `"slm"` or `"asr"`.
+ * @property {boolean} enabled - Whether the model is active in `models.yaml`.
+ */
+
+/**
+ * @typedef {Object} StandardInputs
+ * @property {string} slm_prompt      - Default SLM prompt text.
+ * @property {string} asr_audio_path  - Default audio file path for ASR.
+ * @property {string} asr_reference   - Reference transcript for WER computation.
+ */
+
+/**
+ * @typedef {Object} AudioSample
+ * @property {string} file        - Relative path to the audio file.
+ * @property {string} reference   - Ground-truth transcript.
+ * @property {string} language    - BCP-47 language code, e.g. `"en"`.
+ * @property {number} duration_s  - Duration in seconds.
+ */
+
+/**
+ * @typedef {Object} BenchmarkResult
+ * @property {string} model_id     - Model registry key.
+ * @property {string} result_id    - Filename stem, e.g. `"benchmark_20240101_120000"`.
+ * @property {number} warmup_runs  - Number of discarded warm-up iterations.
+ * @property {number} timed_runs   - Number of measured iterations.
+ * @property {Object} metrics      - Latency, memory, ms/token, WER, transcript.
+ */
+
+/**
+ * @typedef {Object} JobStatus
+ * @property {string}           job_id  - UUID assigned at job creation.
+ * @property {string}           status  - `"pending"` | `"running"` | `"done"` | `"failed"`.
+ * @property {BenchmarkResult}  [result]- Present when `status === "done"`.
+ * @property {string}           [error] - Present when `status === "failed"`.
+ */
+
+/**
+ * @typedef {Object} StartBenchmarkPayload
+ * @property {string} model_id             - Model registry key.
+ * @property {string} input_data           - Prompt text (SLM) or audio path (ASR).
+ * @property {number} warmup_runs          - Warm-up iterations to discard.
+ * @property {number} timed_runs           - Iterations to measure.
+ * @property {string} [reference_transcript] - Ground-truth for WER (ASR only).
+ */
+
+/**
+ * Frozen singleton exposing all backend API calls.
+ * @namespace API
+ */
+const API = (() => {
+  /**
+   * Internal fetch wrapper — throws on non-2xx responses.
+   *
+   * @param {string} path - URL path relative to the server root.
+   * @param {RequestInit} [opts={}] - Options forwarded to `fetch`.
+   * @returns {Promise&lt;*>} Parsed JSON response body.
+   * @throws {Error} If the HTTP status is not in the 2xx range.
+   */
+  async function _fetch(path, opts = {}) {
+    const res = await fetch(path, opts);
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    return res.json();
+  }
+
+  return Object.freeze({
+    /**
+     * Fetch all models registered in `config/models.yaml`.
+     *
+     * @returns {Promise&lt;ModelMeta[]>} Array of model metadata objects.
+     */
+    getModels: () => _fetch('/api/models'),
+
+    /**
+     * Fetch the standard benchmark inputs (default prompt and audio sample).
+     *
+     * @returns {Promise&lt;StandardInputs>} Default input values.
+     */
+    getStandardInputs: () => _fetch('/api/benchmark/inputs'),
+
+    /**
+     * Fetch the list of available audio samples for ASR benchmarks.
+     *
+     * @returns {Promise&lt;AudioSample[]>} Array of audio sample descriptors.
+     */
+    getAudioSamples: () => _fetch('/api/audio/samples'),
+
+    /**
+     * Fetch metadata for all past benchmark results, newest first.
+     *
+     * @returns {Promise&lt;Array&lt;{id: string, timestamp: string, model_id: string}>>}
+     */
+    getResults: () => _fetch('/api/results'),
+
+    /**
+     * Fetch a single benchmark result by its ID.
+     *
+     * @param {string} id - Result ID, e.g. `"benchmark_20240101_120000"`.
+     * @returns {Promise&lt;BenchmarkResult>} Full result object.
+     */
+    getResult: (id) => _fetch(`/api/results/${id}`),
+
+    /**
+     * Poll the current status of a background benchmark job.
+     *
+     * @param {string} jobId - UUID returned by {@link API.startBenchmark}.
+     * @returns {Promise&lt;JobStatus>} Current job status and optional result.
+     */
+    getJob: (jobId) => _fetch(`/api/benchmark/${jobId}`),
+
+    /**
+     * Start a new benchmark job in the background.
+     *
+     * @param {StartBenchmarkPayload} payload - Job parameters.
+     * @returns {Promise&lt;{job_id: string}>} The assigned job UUID.
+     */
+    startBenchmark: (payload) => _fetch('/api/benchmark/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+
+    /**
+     * Open a Server-Sent Events stream for live progress of a running job.
+     * Each event is a JSON object with a `type` field:
+     * `"progress"` | `"done"` | `"error"`.
+     *
+     * @param {string} jobId - UUID of the running job.
+     * @returns {EventSource} SSE connection — caller is responsible for closing it.
+     */
+    streamJob: (jobId) => new EventSource(`/api/benchmark/${jobId}/stream`),
+  });
+})();
+</code></pre>
+        </article>
+    </section>
+
+
+
+
+</div>
+
+<nav>
+    <h2><a href="index.html">Home</a></h2><h3>Modules</h3><ul><li><a href="module-api.html">api</a></li><li><a href="module-app.html">app</a></li><li><a href="module-composables_benchmark.html">composables/benchmark</a></li><li><a href="module-composables_chart.html">composables/chart</a></li><li><a href="module-composables_compare.html">composables/compare</a></li><li><a href="module-composables_history.html">composables/history</a></li><li><a href="module-composables_models.html">composables/models</a></li></ul><h3>Namespaces</h3><ul><li><a href="module-api-API.html">API</a></li></ul><h3>Classes</h3><ul><li><a href="module-composables_benchmark-BenchmarkStore.html">BenchmarkStore</a></li><li><a href="module-composables_chart-ChartStore.html">ChartStore</a></li><li><a href="module-composables_compare-CompareStore.html">CompareStore</a></li><li><a href="module-composables_history-HistoryStore.html">HistoryStore</a></li><li><a href="module-composables_models-ModelsStore.html">ModelsStore</a></li></ul>
+</nav>
+
+<br class="clear">
+
+<footer>
+    Documentation generated by <a href="https://github.com/jsdoc/jsdoc">JSDoc 4.0.5</a> on Sun Mar 08 2026 11:02:25 GMT+0100 (Central European Standard Time)
+</footer>
+
+<script> prettyPrint(); </script>
+<script src="scripts/linenumber.js"> </script>
+</body>
+</html>

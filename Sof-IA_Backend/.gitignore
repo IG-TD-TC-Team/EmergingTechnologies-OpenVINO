@@ -1,0 +1,48 @@
+# ── Python bytecode ──────────────────────────────────────────────────────────
+__pycache__/
+*.py[codz]
+*$py.class
+*.so
+
+# ── Distribution / packaging ────────────────────────────────────────────────
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+
+# ── Virtual environments ────────────────────────────────────────────────────
+.env
+.envrc
+.venv/
+venv/
+env/
+
+# ── Test / coverage ─────────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+*.cover
+
+# ── Models (too large for Git — ~44 GB) ─────────────────────────────────────
+models/
+!models/.gitkeep
+
+# ── Runtime output ──────────────────────────────────────────────────────────
+results/
+!results/.gitkeep
+logs/
+!logs/.gitkeep
+
+# ── IDE / editor ────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ── OS files ────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Local planning ──────────────────────────────────────────────────────────
+plan.md

@@ -1,0 +1,42 @@
+[
+  {
+    "file": "data/benchmark/mls_french/sample_00_fr_speaker1406.wav",
+    "reference": "pendant le second si\u00e8cle je fis serment d'ouvrir tous les tr\u00e9sors de la terre \u00e0 quiconque me mettrait en libert\u00e9 mais je ne fus pas plus heureux dans le troisi\u00e8me je promis de faire puissant monarque mon lib\u00e9rateur d'\u00eatre toujours pr\u00e8s de lui en esprit",
+    "speaker_id": "1406",
+    "duration_s": 16.49,
+    "language": "fr",
+    "dataset": "MLS French test"
+  },
+  {
+    "file": "data/benchmark/mls_french/sample_01_fr_speaker1406.wav",
+    "reference": "non ta mort est certaine dit le g\u00e9nie choisis seulement de quelle sorte tu veux que je te fasse mourir le p\u00eacheur le voyant dans la r\u00e9solution de le tuer en eut une douleur extr\u00eame non pas tant pour l'amour de lui qu'\u00e0 cause de ses trois enfants dont il plaignait la mis\u00e8re o\u00f9 ils allaient \u00eatre r\u00e9duits par sa mort",
+    "speaker_id": "1406",
+    "duration_s": 19.3,
+    "language": "fr",
+    "dataset": "MLS French test"
+  },
+  {
+    "file": "data/benchmark/mls_french/sample_02_fr_speaker1406.wav",
+    "reference": "la nuit suivante appela sa soeur quand il en fut temps si vous ne dormez pas ma soeur lui dit-elle je vous prie en attendant le jour qui para\u00eetra bient\u00f4t de continuer le conte du p\u00eacheur",
+    "speaker_id": "1406",
+    "duration_s": 12.66,
+    "language": "fr",
+    "dataset": "MLS French test"
+  },
+  {
+    "file": "data/benchmark/mls_french/sample_03_fr_speaker1406.wav",
+    "reference": "\u00e0 l'aspect d'un monstre d'une grandeur si d\u00e9mesur\u00e9e le p\u00eacheur voulut prendre la fuite mais il se trouva si troubl\u00e9 et si effray\u00e9 qu'il ne put marcher salomon",
+    "speaker_id": "1406",
+    "duration_s": 10.67,
+    "language": "fr",
+    "dataset": "MLS French test"
+  },
+  {
+    "file": "data/benchmark/mls_french/sample_04_fr_speaker1406.wav",
+    "reference": "le sultan qui n'avait pas moins d'envie que dinarzade d'entendre la fin de ce conte diff\u00e9ra encore la mort de la sultane fin de la dixi\u00e8me nuit cet enregistrement fait partie du domaine public",
+    "speaker_id": "1406",
+    "duration_s": 18.08,
+    "language": "fr",
+    "dataset": "MLS French test"
+  }
+]

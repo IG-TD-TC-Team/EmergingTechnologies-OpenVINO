@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OpenVino Benchmark Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.prod.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="/static/app.css" />
+  <!--
+    Script load order matters in CDN (non-module) mode:
+      1. Vue + Chart.js globals
+      2. vue-globals inline — single shared destructuring for all app scripts
+      3. api.js                    — service layer (no deps)
+      4. composables/models.js     — ModelsStore
+      5. composables/benchmark.js  — BenchmarkStore
+      6. composables/history.js    — HistoryStore
+      7. composables/compare.js    — CompareStore
+      8. composables/chart.js      — ChartStore
+      9. composables/logs.js       — LogsStore
+     10. app.js                    — root assembly
+  -->
+  <script>
+    // Single shared destructuring — declaring these twice across scripts
+    // causes SyntaxError in non-module scope.
+    const { createApp, ref, computed, watch, nextTick, onMounted } = Vue;
+  </script>
+</head>
+<body>
+<div id="app">
+  <!-- ================================================================
+       Component: TopBar
+       Vue SFC  → src/components/TopBar.vue
+       React    → src/components/TopBar.tsx
+       ================================================================ -->
+  <div class="topbar">
+    <h1>OpenVino Benchmark Dashboard</h1>
+    <span>PyTorch vs OpenVINO — local CPU inference</span>
+  </div>
+
+  <!-- Mode navigation -->
+  <nav class="mode-nav">
+    <button class="mode-btn" :class="{active: mode==='benchmark'}" @click="mode='benchmark'">Benchmark</button>
+    <button class="mode-btn" :class="{active: mode==='chat'}"      @click="mode='chat'">Chat</button>
+    <button class="mode-btn" :class="{active: mode==='transcription'}" @click="mode='transcription'">Transcription</button>
+  </nav>
+
+  <!-- ================================================================
+       MODE: Benchmark
+       ================================================================ -->
+  <div class="layout" v-if="mode==='benchmark'">
+    <!-- LEFT: RunPanel + HistoryList -->
+    <div style="display:flex;flex-direction:column;gap:1rem;">
+
+      <!-- ============================================================
+           Component: RunPanel
+           Vue SFC  → src/components/RunPanel.vue
+           React    → src/components/RunPanel.tsx
+           Props    : models, selectedModel, standardInputs, audioSamples,
+                      audioSamplesByLang, run
+           Emits    : start, model-change, sample-select, use-standard-prompt
+           ============================================================ -->
+      <!-- RunPanel -->
+      <div class="card">
+        <h2>Run Benchmark</h2>
+
+        <label>Model</label>
+        <select v-model="run.modelId" :disabled="run.running" @change="onModelChange">
+          <option v-if="models.length === 0" value="" disabled>Loading…</option>
+          <option v-for="m in models" :key="m.id" :value="m.id" :disabled="!m.enabled">
+            {{ m.label }}{{ !m.enabled ? ' (disabled)' : '' }}
+          </option>
+        </select>
+        <div v-if="selectedModel" class="hint">
+          Type:
+          <span class="model-type-badge" :class="selectedModel.type === 'slm' ? 'badge-slm' : 'badge-asr'">
+            {{ selectedModel.type.toUpperCase() }}
+          </span>
+        </div>
+
+        <hr class="section-divider" />
+
+        <!-- SLM input -->
+        <template v-if="selectedModel && selectedModel.type === 'slm'">
+          <div class="input-row">
+            <div>
+              <label>Prompt</label>
+              <textarea v-model="run.inputData" :disabled="run.running" placeholder="Enter prompt text…"></textarea>
+            </div>
+          </div>
+          <button class="btn btn-ghost btn-sm" style="margin-top:.4rem;" :disabled="run.running || !standardInputs.slm_prompt" @click="useStandardPrompt">
+            Use standard prompt
+          </button>
+        </template>
+
+        <!-- ASR input -->
+        <template v-else-if="selectedModel && selectedModel.type === 'asr'">
+
+          <!-- Sample selector -->
+          <label>Sample</label>
+          <select :disabled="run.running" @change="onSampleSelect">
+            <option value="">— select a sample or enter manually —</option>
+            <template v-for="(samples, lang) in audioSamplesByLang" :key="lang">
+              <optgroup :label="lang === 'en' ? 'English — LibriSpeech' : lang === 'fr' ? 'French — MLS' : lang.toUpperCase()">
+                <option v-for="(s, i) in samples" :key="s.file" :value="audioSamples.indexOf(s)">
+                  {{ s.duration_s }}s &nbsp;·&nbsp; {{ s.reference.slice(0, 55) }}{{ s.reference.length > 55 ? '…' : '' }}
+                </option>
+              </optgroup>
+            </template>
+          </select>
+
+          <label style="margin-top:.75rem;">Audio file path</label>
+          <input type="text" v-model="run.inputData" :disabled="run.running" placeholder="data/benchmark/librispeech/sample_00.wav" />
+          <div class="hint">Filled automatically when a sample is selected above.</div>
+
+          <label style="margin-top:.75rem;">Reference transcript (for WER)</label>
+          <textarea v-model="run.referenceTranscript" :disabled="run.running"
+            placeholder="Filled automatically from the selected sample…"
+            style="min-height:60px;"></textarea>
+        </template>
+
+        <hr class="section-divider" />
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem;">
+          <div>
+            <label>Warm-up runs</label>
+            <input type="number" v-model.number="run.warmupRuns" min="0" max="20" :disabled="run.running" />
+          </div>
+          <div>
+            <label>Timed runs</label>
+            <input type="number" v-model.number="run.timedRuns" min="1" max="50" :disabled="run.running" />
+          </div>
+        </div>
+
+        <button
+          class="btn btn-primary"
+          style="width:100%;"
+          :disabled="run.running || !run.inputData.trim()"
+          @click="startBenchmark"
+        >
+          {{ run.running ? 'Running…' : 'Start Benchmark' }}
+        </button>
+
+        <div v-if="run.running || run.log.length">
+          <div class="progress-bar-wrap">
+            <div class="progress-bar-fill" :style="{width: run.progress + '%'}"></div>
+          </div>
+          <div class="log" ref="logEl">
+            <div v-for="(line, i) in run.log" :key="i">{{ line }}</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================================================
+           Component: HistoryList
+           Vue SFC  → src/components/HistoryList.vue
+           React    → src/components/HistoryList.tsx
+           Props    : history, activeResult, compareA, compareB
+           Emits    : select(id), refresh
+           ============================================================ -->
+      <!-- HistoryList -->
+      <div class="card">
+        <h2>Past Runs</h2>
+        <div v-if="history.length === 0" class="empty">No results yet.</div>
+        <div
+          v-for="item in history"
+          :key="item.id"
+          class="history-item"
+          :class="{selected: compareA === item.id || compareB === item.id || (activeResult && activeResult.result_id === item.id)}"
+          @click="loadResult(item.id)"
+        >
+          <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+            <span v-if="item.model_id" class="model-type-badge" :class="modelTypeClass(item.model_id)" style="margin-left:0;margin-right:.3rem;">
+              {{ modelTypeLetter(item.model_id) }}
+            </span>
+            {{ item.model_id || '—' }}
+          </span>
+          <span class="history-ts">{{ formatTimestamp(item.timestamp) }}</span>
+        </div>
+        <button class="btn btn-secondary btn-sm" style="margin-top:.5rem;width:100%;" @click="fetchHistory">Refresh</button>
+      </div>
+
+    </div>
+
+    <!-- RIGHT: tabs -->
+    <div class="card">
+      <div class="tabs">
+        <button class="tab" :class="{active: tab==='results'}" @click="tab='results'">Results</button>
+        <button class="tab" :class="{active: tab==='compare'}" @click="tab='compare'">Compare</button>
+        <button class="tab" :class="{active: tab==='chart'}"   @click="tab='chart'">Chart</button>
+        <button class="tab" :class="{active: tab==='logs'}"    @click="tab='logs'">Logs</button>
+      </div>
+
+      <!-- ============================================================
+           Component: ResultsTab
+           Vue SFC  → src/components/ResultsTab.vue
+           React    → src/components/ResultsTab.tsx
+           Props    : activeResult
+           Emits    : export
+           ============================================================ -->
+      <!-- Results tab -->
+      <div v-if="tab==='results'">
+        <div v-if="!activeResult" class="empty">Select a past run from the list, or start a new one.</div>
+        <div v-else>
+          <p style="font-size:.8rem;color:#64748b;margin-bottom:.75rem;">
+            Model: <strong style="color:#e2e8f0;">{{ activeResult.model_id }}</strong>
+            &nbsp;&middot;&nbsp; ID: <code>{{ activeResult.result_id }}</code>
+            &nbsp;&middot;&nbsp; Timed runs: {{ activeResult.timed_runs }}
+          </p>
+          <table>
+            <thead><tr><th>Metric</th><th>Value</th></tr></thead>
+            <tbody>
+              <template v-if="activeResult.metrics.latency">
+                <tr><td>Mean latency</td><td class="metric-val">{{ fmt(activeResult.metrics.latency.mean_ms) }} ms</td></tr>
+                <tr><td>p50 latency</td><td class="metric-val">{{ fmt(activeResult.metrics.latency.p50_ms) }} ms</td></tr>
+                <tr><td>p95 latency</td><td class="metric-val">{{ fmt(activeResult.metrics.latency.p95_ms) }} ms</td></tr>
+                <tr><td>Min latency</td><td class="metric-val">{{ fmt(activeResult.metrics.latency.min_ms) }} ms</td></tr>
+                <tr><td>Max latency</td><td class="metric-val">{{ fmt(activeResult.metrics.latency.max_ms) }} ms</td></tr>
+              </template>
+              <template v-if="activeResult.metrics.ms_per_token">
+                <tr><td>Mean ms/token</td><td class="metric-val">{{ fmt(activeResult.metrics.ms_per_token.mean_ms_per_token) }} ms</td></tr>
+                <tr><td>p50 ms/token</td> <td class="metric-val">{{ fmt(activeResult.metrics.ms_per_token.p50_ms_per_token) }} ms</td></tr>
+                <tr><td>p95 ms/token</td> <td class="metric-val">{{ fmt(activeResult.metrics.ms_per_token.p95_ms_per_token) }} ms</td></tr>
+                <tr v-if="activeResult.metrics.ms_per_token.mean_tokens_per_sec != null">
+                  <td>Mean tokens/sec</td>
+                  <td class="metric-val">{{ activeResult.metrics.ms_per_token.mean_tokens_per_sec.toFixed(2) }} tok/s</td>
+                </tr>
+              </template>
+              <template v-if="activeResult.metrics.rtf != null || activeResult.metrics.words_per_sec != null">
+                <tr v-if="activeResult.metrics.audio_duration_s != null">
+                  <td>Audio duration</td>
+                  <td class="metric-val">{{ activeResult.metrics.audio_duration_s.toFixed(2) }} s</td>
+                </tr>
+                <tr v-if="activeResult.metrics.rtf != null">
+                  <td>Real-Time Factor (RTF)</td>
+                  <td class="metric-val" :style="{color: activeResult.metrics.rtf < 1 ? '#6ee7b7' : '#fca5a5'}">
+                    {{ activeResult.metrics.rtf.toFixed(3) }}
+                    <span style="font-size:.7rem;color:#64748b;">({{ activeResult.metrics.rtf < 1 ? 'faster than real-time' : 'slower than real-time' }})</span>
+                  </td>
+                </tr>
+                <tr v-if="activeResult.metrics.words_per_sec != null">
+                  <td>Words per second</td>
+                  <td class="metric-val">{{ activeResult.metrics.words_per_sec.toFixed(2) }} w/s</td>
+                </tr>
+              </template>
+              <tr v-if="activeResult.metrics.peak_memory_mb != null">
+                <td>Peak working set</td>
+                <td class="metric-val">{{ fmt(activeResult.metrics.peak_memory_mb) }} MB</td>
+              </tr>
+              <tr v-if="activeResult.metrics.load_memory_mb != null">
+                <td>Model load RSS delta</td>
+                <td class="metric-val">{{ fmt(activeResult.metrics.load_memory_mb) }} MB</td>
+              </tr>
+              <tr v-if="activeResult.metrics.wer != null">
+                <td><strong>WER</strong></td>
+                <td class="metric-val" :style="{color: activeResult.metrics.wer < 0.2 ? '#6ee7b7' : activeResult.metrics.wer < 0.5 ? '#fbbf24' : '#fca5a5'}">
+                  {{ (activeResult.metrics.wer * 100).toFixed(1) }}%
+                </td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div v-if="activeResult.audio_path" style="margin-top:1rem;">
+            <h2>Audio</h2>
+            <audio controls style="width:100%;margin-top:.35rem;accent-color:#3b82f6;">
+              <source :src="'/api/audio?path=' + encodeURIComponent(activeResult.audio_path)" type="audio/wav" />
+              Your browser does not support the audio element.
+            </audio>
+          </div>
+
+          <div v-if="activeResult.metrics.transcript" style="margin-top:1rem;">
+            <h2>Transcript</h2>
+            <pre style="font-size:.75rem;color:#94a3b8;white-space:pre-wrap;background:#0f172a;padding:.5rem;border-radius:.3rem;max-height:150px;overflow-y:auto;">{{ activeResult.metrics.transcript }}</pre>
+          </div>
+
+          <button class="btn btn-secondary" style="margin-top:.75rem;" @click="exportResult">Export JSON</button>
+        </div>
+      </div>
+
+      <!-- ============================================================
+           Component: CompareTab
+           Vue SFC  → src/components/CompareTab.vue
+           React    → src/components/CompareTab.tsx
+           Props    : history, compareA, compareB, compareResults, compareRows
+           Emits    : compare
+           ============================================================ -->
+      <!-- Compare tab -->
+      <div v-if="tab==='compare'">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;margin-bottom:.75rem;">
+          <div>
+            <label>Run A</label>
+            <select v-model="compareA">
+              <option value="">— select —</option>
+              <option v-for="h in history" :key="h.id" :value="h.id">
+                {{ h.model_id || '?' }} · {{ formatTimestamp(h.timestamp) }}
+              </option>
+            </select>
+          </div>
+          <div>
+            <label>Run B</label>
+            <select v-model="compareB">
+              <option value="">— select —</option>
+              <option v-for="h in history" :key="h.id" :value="h.id">
+                {{ h.model_id || '?' }} · {{ formatTimestamp(h.timestamp) }}
+              </option>
+            </select>
+          </div>
+        </div>
+        <button class="btn btn-primary" :disabled="!compareA || !compareB" @click="loadCompare">Compare</button>
+
+        <div v-if="compareResults.a && compareResults.b" style="margin-top:1rem;">
+          <table>
+            <thead>
+              <tr>
+                <th>Metric</th>
+                <th>{{ compareResults.a.model_id }} (A)</th>
+                <th>{{ compareResults.b.model_id }} (B)</th>
+                <th>Diff</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template v-for="row in compareRows" :key="row.label">
+                <tr>
+                  <td>{{ row.label }}</td>
+                  <td class="metric-val" :class="row.winnerA ? 'win' : ''">{{ row.a }}</td>
+                  <td class="metric-val" :class="row.winnerB ? 'win' : ''">{{ row.b }}</td>
+                  <td :class="row.speedupColor">{{ row.speedup }}</td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+          <p class="hint" style="margin-top:.5rem;">Green = better. Lower is better for latency/RTF/memory/WER. Higher is better for tokens/sec and words/sec.</p>
+        </div>
+      </div>
+
+      <!-- ============================================================
+           Component: ChartTab
+           Vue SFC  → src/components/ChartTab.vue
+           React    → src/components/ChartTab.tsx
+           Props    : compareResults
+           Refs     : chartCanvas
+           ============================================================ -->
+      <!-- Chart tab -->
+      <div v-if="tab==='chart'">
+        <p style="font-size:.8rem;color:#64748b;margin-bottom:.5rem;">
+          Mean latency (ms) for two compared runs. Load two runs in the Compare tab first.
+        </p>
+        <div class="chart-wrap">
+          <canvas ref="chartCanvas"></canvas>
+        </div>
+        <button class="btn btn-secondary" style="margin-top:.5rem;" @click="renderChart">Refresh chart</button>
+      </div>
+
+      <!-- Logs tab -->
+      <div v-if="tab==='logs'">
+        <div style="display:flex;align-items:center;gap:.75rem;margin-bottom:.75rem;flex-wrap:wrap;">
+          <select v-model="logsStore.levelFilter.value" @change="logsStore.fetch()" style="width:auto;">
+            <option value="">All levels</option>
+            <option value="DEBUG">DEBUG</option>
+            <option value="INFO">INFO</option>
+            <option value="WARNING">WARNING</option>
+            <option value="ERROR">ERROR</option>
+            <option value="CRITICAL">CRITICAL</option>
+          </select>
+          <button class="btn btn-secondary btn-sm" @click="logsStore.fetch()" :disabled="logsStore.loading.value">
+            {{ logsStore.loading.value ? 'Loading…' : 'Refresh' }}
+          </button>
+          <span style="font-size:.75rem;color:#64748b;">Auto-refresh every 5s</span>
+        </div>
+        <div v-if="logsStore.records.value.length === 0" class="empty">No log entries yet.</div>
+        <div v-else style="overflow-x:auto;">
+          <table>
+            <thead>
+              <tr>
+                <th>Timestamp</th>
+                <th>Level</th>
+                <th>Logger</th>
+                <th>Job ID</th>
+                <th>Message</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(rec, i) in logsStore.records.value" :key="i">
+                <td style="white-space:nowrap;font-size:.7rem;color:#94a3b8;">{{ rec.ts }}</td>
+                <td>
+                  <span class="model-type-badge"
+                    :style="{background: rec.level==='ERROR'||rec.level==='CRITICAL' ? '#ef4444' : rec.level==='WARNING' ? '#f59e0b' : rec.level==='DEBUG' ? '#06b6d4' : '#22c55e', color:'#fff', padding:'1px 6px', borderRadius:'4px', fontSize:'.65rem', fontWeight:600}">
+                    {{ rec.level }}
+                  </span>
+                </td>
+                <td style="font-size:.72rem;color:#94a3b8;white-space:nowrap;">{{ rec.logger }}</td>
+                <td style="font-size:.72rem;color:#64748b;white-space:nowrap;">{{ rec.job_id || '-' }}</td>
+                <td style="font-size:.75rem;word-break:break-all;">{{ rec.msg }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ================================================================
+       MODE: Chat
+       ================================================================ -->
+  <div class="chat-layout" v-else-if="mode==='chat'">
+
+    <!-- Sidebar: settings -->
+    <div class="chat-sidebar">
+      <div class="card">
+        <h2>Chat Settings</h2>
+
+        <label>Model</label>
+        <select v-model="chat.modelId.value" :disabled="chat.busy.value">
+          <option v-if="slmModels.length === 0" value="" disabled>No enabled SLMs</option>
+          <option v-for="m in slmModels" :key="m.id" :value="m.id">{{ m.label }}</option>
+        </select>
+
+        <label style="margin-top:.75rem;">System Prompt</label>
+        <textarea v-model="chat.systemPrompt.value" :disabled="chat.busy.value" style="min-height:120px;"></textarea>
+
+        <button class="btn btn-secondary" style="width:100%;margin-top:.75rem;"
+          :disabled="chat.busy.value || chat.messages.value.length === 0"
+          @click="clearChat">
+          Clear conversation
+        </button>
+      </div>
+    </div>
+
+    <!-- Main: messages + input -->
+    <div class="card chat-main">
+
+      <!-- Message list -->
+      <div class="chat-messages" ref="chatEl">
+        <div v-if="chat.messages.value.length === 0" class="empty" style="align-self:center;margin:auto;">
+          Start a conversation by typing a message below.
+        </div>
+        <div
+          v-for="(msg, i) in chat.messages.value"
+          :key="i"
+          class="chat-bubble"
+          :class="msg.role"
+        >
+          <div class="chat-bubble-content">{{ msg.content }}<span v-if="msg.streaming" class="chat-cursor"></span></div>
+          <div v-if="msg.metrics" class="chat-metrics">{{ msg.metrics }}</div>
+        </div>
+      </div>
+
+      <!-- Error -->
+      <div v-if="chat.error.value" style="font-size:.8rem;color:#fca5a5;padding:.3rem 0;">
+        {{ chat.error.value }}
+      </div>
+
+      <!-- Input row -->
+      <div class="chat-input-row">
+        <textarea
+          v-model="chat.input.value"
+          :disabled="chat.busy.value"
+          placeholder="Type a message…"
+          @keydown.enter.exact.prevent="sendChat"
+        ></textarea>
+        <button class="btn btn-primary" :disabled="chat.busy.value || !chat.input.value.trim()" @click="sendChat">
+          {{ chat.busy.value ? '…' : 'Send' }}
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================
+       MODE: Transcription
+       ================================================================ -->
+  <div v-else-if="mode==='transcription'" class="coming-soon">
+    Transcription — coming soon
+  </div>
+
+</div>
+
+<script src="/static/api.js"></script>
+<script src="/static/composables/models.js"></script>
+<script src="/static/composables/benchmark.js"></script>
+<script src="/static/composables/history.js"></script>
+<script src="/static/composables/compare.js"></script>
+<script src="/static/composables/chart.js"></script>
+<script src="/static/composables/logs.js"></script>
+<script src="/static/composables/chat.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

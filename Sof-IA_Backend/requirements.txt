@@ -1,0 +1,24 @@
+# ── Core OpenVINO ────────────────────────────────────────────────────────────
+openvino>=2024.3.0
+openvino-genai>=2024.3.0
+optimum-intel[openvino]>=1.18.0
+
+# ── Models & Inference ───────────────────────────────────────────────────────
+transformers>=4.40.0
+torch>=2.2.0                  # CPU-only install: pip install torch --index-url https://download.pytorch.org/whl/cpu
+accelerate>=0.28.0
+sentencepiece>=0.2.0
+
+# ── Audio ────────────────────────────────────────────────────────────────────
+soundfile>=0.12.0
+sounddevice>=0.4.6        # Real-time audio capture from microphone
+
+# ── Benchmarking & Metrics ───────────────────────────────────────────────────
+psutil>=5.9.0         # Memory / CPU monitoring
+numpy>=1.26.0
+
+# ── Web Server ───────────────────────────────────────────────────────────────
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+pydantic>=2.0.0
+PyYAML>=6.0.0

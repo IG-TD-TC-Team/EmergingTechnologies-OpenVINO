@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>JSDoc: Source: app.js</title>
+
+    <script src="scripts/prettify/prettify.js"> </script>
+    <script src="scripts/prettify/lang-css.js"> </script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <link type="text/css" rel="stylesheet" href="styles/prettify-tomorrow.css">
+    <link type="text/css" rel="stylesheet" href="styles/jsdoc-default.css">
+</head>
+
+<body>
+
+<div id="main">
+
+    <h1 class="page-title">Source: app.js</h1>
+
+    
+
+
+
+    
+    <section>
+        <article>
+            <pre class="prettyprint source linenums"><code>/**
+ * @fileoverview Root Vue 3 application — instantiates all stores and wires
+ * cross-store reactions.
+ *
+ * Responsibilities of this file:
+ * 1. Instantiate one instance of each store class.
+ * 2. Define computed state that spans multiple stores.
+ * 3. Wire cross-store side-effects via `watch` (the only place stores talk to each other).
+ * 4. Define template helpers that need data from more than one store.
+ * 5. Return a flat surface object consumed by `index.html`.
+ *
+ * @module app
+ */
+
+createApp({
+  /**
+   * Vue 3 Composition API setup function.
+   * All reactive state, watchers, and lifecycle hooks are registered here.
+   *
+   * @returns {Object} Flat object of refs, computed values, and methods
+   *   exposed to the HTML template.
+   */
+  setup() {
+    // ------------------------------------------------------------------
+    // Store instances
+    // ------------------------------------------------------------------
+
+    /** @type {ModelsStore} */
+    const modelStore = new ModelsStore();
+
+    /** @type {BenchmarkStore} */
+    const benchmark  = new BenchmarkStore();
+
+    /** @type {HistoryStore} */
+    const histStore  = new HistoryStore();
+
+    /** @type {CompareStore} */
+    const compare    = new CompareStore();
+
+    /** @type {ChartStore} */
+    const chart      = new ChartStore();
+
+    /**
+     * Currently active right-panel tab.
+     * @type {Ref} One of `"results"`, `"compare"`, or `"chart"`.
+     */
+    const tab = ref('results');
+
+    // ------------------------------------------------------------------
+    // Derived state spanning multiple stores
+    // ------------------------------------------------------------------
+
+    /**
+     * The full ModelMeta object for the model currently selected in the form.
+     * `null` when no model is selected or the list is still loading.
+     *
+     * @type {ComputedRef} Holds a {@link ModelMeta} or `null`.
+     */
+    const selectedModel = computed(() =>
+      modelStore.models.value.find(m => m.id === benchmark.run.value.modelId) || null
+    );
+
+    // ------------------------------------------------------------------
+    // Cross-store wiring — the only place inter-store reactions live
+    // ------------------------------------------------------------------
+
+    /**
+     * When a benchmark completes, display the result in the Results tab
+     * and refresh the history list.
+     */
+    watch(benchmark.lastResult, (result) => {
+      if (!result) return;
+      histStore.activeResult.value = result;
+      tab.value = 'results';
+      histStore.fetchHistory();
+    });
+
+    /**
+     * When both compare results are loaded, automatically render the chart
+     * so it is ready if the user switches to the Chart tab.
+     */
+    watch(
+      () => compare.compareResults.value,
+      (results) => { if (results.a &amp;&amp; results.b) chart.render(results); },
+      { deep: true }
+    );
+
+    /**
+     * When the user switches to the Chart tab, re-render in case the canvas
+     * element was not yet in the DOM when the data first loaded.
+     */
+    watch(tab, (t) => {
+      if (t === 'chart') chart.render(compare.compareResults.value);
+    });
+
+    // ------------------------------------------------------------------
+    // Template helpers — functions that read from more than one store
+    // ------------------------------------------------------------------
+
+    /**
+     * Fill the prompt field with the standard SLM prompt from the server.
+     */
+    function useStandardPrompt() {
+      benchmark.run.value.inputData = modelStore.standardInputs.value.slm_prompt;
+    }
+
+    /**
+     * Handle a selection from the audio sample `&lt;select>` element.
+     * Fills both the audio path and the reference transcript fields.
+     *
+     * @param {Event} evt - The native `change` event from the `&lt;select>`.
+     */
+    function onSampleSelect(evt) {
+      const idx    = evt.target.value;
+      if (idx === '') return;
+      const sample = modelStore.audioSamples.value[idx];
+      if (!sample) return;
+      benchmark.run.value.inputData           = sample.file;
+      benchmark.run.value.referenceTranscript = sample.reference;
+    }
+
+    /**
+     * Format a numeric metric value to one decimal place.
+     *
+     * @param {number|null} v - The value to format.
+     * @returns {string} Formatted string, or `"—"` when the value is absent.
+     */
+    function fmt(v) { return v != null ? v.toFixed(1) : '—'; }
+
+    /**
+     * Convert a compact timestamp string to a readable date-time string.
+     *
+     * @param {string} ts - Compact timestamp, e.g. `"20240101_120000"`.
+     * @returns {string} Formatted string, e.g. `"2024-01-01 12:00"`, or `"—"`.
+     */
+    function formatTimestamp(ts) {
+      if (!ts || ts.length &lt; 15) return ts || '—';
+      return `${ts.slice(0,4)}-${ts.slice(4,6)}-${ts.slice(6,8)} ${ts.slice(9,11)}:${ts.slice(11,13)}`;
+    }
+
+    // ------------------------------------------------------------------
+    // Initialisation
+    // ------------------------------------------------------------------
+
+    /**
+     * On mount: load all remote data in parallel, then select the first
+     * enabled model so the form is ready to use without manual interaction.
+     */
+    onMounted(async () => {
+      await Promise.all([modelStore.init(), histStore.fetchHistory()]);
+      const first = modelStore.models.value.find(m => m.enabled);
+      if (first) benchmark.run.value.modelId = first.id;
+    });
+
+    // ------------------------------------------------------------------
+    // Template surface
+    // ------------------------------------------------------------------
+    return {
+      tab,
+
+      // --- modelStore ---
+      models:             modelStore.models,
+      standardInputs:     modelStore.standardInputs,
+      audioSamples:       modelStore.audioSamples,
+      audioSamplesByLang: modelStore.audioSamplesByLang,
+      modelTypeClass:     (id) => modelStore.modelTypeClass(id),
+      modelTypeLetter:    (id) => modelStore.modelTypeLetter(id),
+      selectedModel,
+
+      // --- benchmark ---
+      run:              benchmark.run,
+      logEl:            benchmark.logEl,
+      startBenchmark:   () => benchmark.start(),
+      onModelChange:    () => benchmark.onModelChange(),
+      useStandardPrompt,
+      onSampleSelect,
+
+      // --- histStore ---
+      history:      histStore.history,
+      activeResult: histStore.activeResult,
+      fetchHistory: () => histStore.fetchHistory(),
+      loadResult:   (id) => histStore.loadResult(id),
+      exportResult: () => histStore.exportResult(),
+
+      // --- compare ---
+      compareA:       compare.compareA,
+      compareB:       compare.compareB,
+      compareResults: compare.compareResults,
+      compareRows:    compare.compareRows,
+      loadCompare:    () => compare.load(),
+
+      // --- chart ---
+      chartCanvas: chart.chartCanvas,
+      renderChart: () => chart.render(compare.compareResults.value),
+
+      // --- helpers ---
+      fmt,
+      formatTimestamp,
+    };
+  },
+}).mount('#app');
+</code></pre>
+        </article>
+    </section>
+
+
+
+
+</div>
+
+<nav>
+    <h2><a href="index.html">Home</a></h2><h3>Modules</h3><ul><li><a href="module-api.html">api</a></li><li><a href="module-app.html">app</a></li><li><a href="module-composables_benchmark.html">composables/benchmark</a></li><li><a href="module-composables_chart.html">composables/chart</a></li><li><a href="module-composables_compare.html">composables/compare</a></li><li><a href="module-composables_history.html">composables/history</a></li><li><a href="module-composables_models.html">composables/models</a></li></ul><h3>Namespaces</h3><ul><li><a href="module-api-API.html">API</a></li></ul><h3>Classes</h3><ul><li><a href="module-composables_benchmark-BenchmarkStore.html">BenchmarkStore</a></li><li><a href="module-composables_chart-ChartStore.html">ChartStore</a></li><li><a href="module-composables_compare-CompareStore.html">CompareStore</a></li><li><a href="module-composables_history-HistoryStore.html">HistoryStore</a></li><li><a href="module-composables_models-ModelsStore.html">ModelsStore</a></li></ul>
+</nav>
+
+<br class="clear">
+
+<footer>
+    Documentation generated by <a href="https://github.com/jsdoc/jsdoc">JSDoc 4.0.5</a> on Sun Mar 08 2026 11:02:25 GMT+0100 (Central European Standard Time)
+</footer>
+
+<script> prettyPrint(); </script>
+<script src="scripts/linenumber.js"> </script>
+</body>
+</html>

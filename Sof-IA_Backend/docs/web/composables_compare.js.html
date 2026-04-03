@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>JSDoc: Source: composables/compare.js</title>
+
+    <script src="scripts/prettify/prettify.js"> </script>
+    <script src="scripts/prettify/lang-css.js"> </script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <link type="text/css" rel="stylesheet" href="styles/prettify-tomorrow.css">
+    <link type="text/css" rel="stylesheet" href="styles/jsdoc-default.css">
+</head>
+
+<body>
+
+<div id="main">
+
+    <h1 class="page-title">Source: composables/compare.js</h1>
+
+    
+
+
+
+    
+    <section>
+        <article>
+            <pre class="prettyprint source linenums"><code>/**
+ * @fileoverview CompareStore — reactive state for the A/B comparison view.
+ *
+ * @module composables/compare
+ */
+
+/**
+ * @typedef {Object} CompareRow
+ * @property {string}  label        - Metric name, e.g. `"Mean latency"`.
+ * @property {string}  a            - Formatted value for run A, e.g. `"123.4 ms"`.
+ * @property {string}  b            - Formatted value for run B.
+ * @property {boolean} winnerA      - `true` if run A has the better (lower) value.
+ * @property {boolean} winnerB      - `true` if run B has the better (lower) value.
+ * @property {string}  speedup      - Human-readable delta, e.g. `"1.5x faster"`.
+ * @property {string}  speedupColor - CSS class: `"win"`, `"lose"`, or `""`.
+ */
+
+/**
+ * Manages the selection of two past runs for side-by-side comparison
+ * and derives the comparison table rows automatically.
+ *
+ * The `compareRows` computed ref is recalculated whenever `compareResults`
+ * changes — no manual refresh needed.
+ */
+class CompareStore {
+  /**
+   * Creates a CompareStore with empty selection and no loaded results.
+   */
+  constructor() {
+    /** @type {Ref} Result ID string selected for run A. */
+    this.compareA = ref('');
+
+    /** @type {Ref} Result ID string selected for run B. */
+    this.compareB = ref('');
+
+    /**
+     * The two loaded result objects after calling {@link CompareStore#load}.
+     *
+     * @type {Ref} Object with shape `{a: BenchmarkResult|null, b: BenchmarkResult|null}`.
+     */
+    this.compareResults = ref({ a: null, b: null });
+
+    /**
+     * Comparison table rows derived from `compareResults`.
+     * Returns an empty array until both `a` and `b` are loaded.
+     *
+     * @type {ComputedRef} Array of {@link CompareRow} objects.
+     */
+    this.compareRows = computed(() => this._buildRows());
+  }
+
+  // ------------------------------------------------------------------
+  // Actions
+  // ------------------------------------------------------------------
+
+  /**
+   * Fetch both selected results in parallel and store them in `compareResults`.
+   * Requires both {@link CompareStore#compareA} and {@link CompareStore#compareB}
+   * to be set before calling.
+   * Errors are caught and logged — `compareResults` is not modified on failure.
+   *
+   * @returns {Promise&lt;void>}
+   */
+  async load() {
+    try {
+      const [a, b] = await Promise.all([
+        API.getResult(this.compareA.value),
+        API.getResult(this.compareB.value),
+      ]);
+      this.compareResults.value = { a, b };
+    } catch (e) {
+      console.error('CompareStore.load', e);
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // Private
+  // ------------------------------------------------------------------
+
+  /**
+   * Build the comparison table rows from the currently loaded results.
+   * Called automatically by the `compareRows` computed ref.
+   * Lower values are considered better for all numeric metrics.
+   *
+   * @returns {CompareRow[]} Rows ready for rendering. Empty if either result is absent.
+   * @private
+   */
+  _buildRows() {
+    const { a, b } = this.compareResults.value;
+    if (!a || !b) return [];
+
+    const rows = [];
+
+    /**
+     * Append a numeric metric row, computing winner and speedup string.
+     *
+     * @param {string} label   - Display label.
+     * @param {number|null} valA - Metric value for run A.
+     * @param {number|null} valB - Metric value for run B.
+     * @param {string} [unit='ms'] - Unit suffix for display.
+     */
+    const _addRow = (label, valA, valB, unit = 'ms') => {
+      if (valA == null || valB == null) return;
+      const winnerA    = valA &lt; valB;
+      const winnerB    = valB &lt; valA;
+      const ratio      = valB > 0 ? valA / valB : null;
+      const speedupStr = ratio != null
+        ? (ratio &lt; 1 ? `${(1 / ratio).toFixed(2)}x faster` : `${ratio.toFixed(2)}x slower`)
+        : '—';
+      rows.push({
+        label,
+        a:            `${valA.toFixed(1)} ${unit}`,
+        b:            `${valB.toFixed(1)} ${unit}`,
+        winnerA,      winnerB,
+        speedup:      speedupStr,
+        speedupColor: winnerA ? 'win' : winnerB ? 'lose' : '',
+      });
+    };
+
+    const la = a.metrics?.latency,         lb  = b.metrics?.latency;
+    if (la &amp;&amp; lb) {
+      _addRow('Mean latency', la.mean_ms, lb.mean_ms);
+      _addRow('p50 latency',  la.p50_ms,  lb.p50_ms);
+      _addRow('p95 latency',  la.p95_ms,  lb.p95_ms);
+    }
+
+    const ta = a.metrics?.ms_per_token,    tb  = b.metrics?.ms_per_token;
+    if (ta &amp;&amp; tb) _addRow('Mean ms/token', ta.mean_ms_per_token, tb.mean_ms_per_token);
+
+    const ma = a.metrics?.memory_delta_mb, mb_ = b.metrics?.memory_delta_mb;
+    if (ma != null &amp;&amp; mb_ != null) _addRow('Memory delta', ma, mb_, 'MB');
+
+    const wa = a.metrics?.wer,             wb  = b.metrics?.wer;
+    if (wa != null &amp;&amp; wb != null) {
+      const waP = wa * 100, wbP = wb * 100, diff = waP - wbP;
+      rows.push({
+        label:        'WER',
+        a:            `${waP.toFixed(1)}%`,
+        b:            `${wbP.toFixed(1)}%`,
+        winnerA:      waP &lt; wbP,
+        winnerB:      wbP &lt; waP,
+        speedup:      diff === 0 ? 'equal' : `${diff > 0 ? '+' : ''}${diff.toFixed(1)} pp`,
+        speedupColor: diff &lt; 0 ? 'win' : diff > 0 ? 'lose' : '',
+      });
+    }
+
+    return rows;
+  }
+}
+</code></pre>
+        </article>
+    </section>
+
+
+
+
+</div>
+
+<nav>
+    <h2><a href="index.html">Home</a></h2><h3>Modules</h3><ul><li><a href="module-api.html">api</a></li><li><a href="module-app.html">app</a></li><li><a href="module-composables_benchmark.html">composables/benchmark</a></li><li><a href="module-composables_chart.html">composables/chart</a></li><li><a href="module-composables_compare.html">composables/compare</a></li><li><a href="module-composables_history.html">composables/history</a></li><li><a href="module-composables_models.html">composables/models</a></li></ul><h3>Namespaces</h3><ul><li><a href="module-api-API.html">API</a></li></ul><h3>Classes</h3><ul><li><a href="module-composables_benchmark-BenchmarkStore.html">BenchmarkStore</a></li><li><a href="module-composables_chart-ChartStore.html">ChartStore</a></li><li><a href="module-composables_compare-CompareStore.html">CompareStore</a></li><li><a href="module-composables_history-HistoryStore.html">HistoryStore</a></li><li><a href="module-composables_models-ModelsStore.html">ModelsStore</a></li></ul>
+</nav>
+
+<br class="clear">
+
+<footer>
+    Documentation generated by <a href="https://github.com/jsdoc/jsdoc">JSDoc 4.0.5</a> on Sun Mar 08 2026 11:02:25 GMT+0100 (Central European Standard Time)
+</footer>
+
+<script> prettyPrint(); </script>
+<script src="scripts/linenumber.js"> </script>
+</body>
+</html>

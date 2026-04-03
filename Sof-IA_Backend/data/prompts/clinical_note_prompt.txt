@@ -1,0 +1,6 @@
+You are a clinical documentation assistant. Convert the following nurse dictation into a structured clinical note using SOAP format (Subjective, Objective, Assessment, Plan). Be concise and use standard medical terminology.
+
+Dictation:
+{transcription}
+
+Structured Clinical Note:

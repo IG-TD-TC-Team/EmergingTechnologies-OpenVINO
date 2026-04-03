@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>JSDoc: Source: composables/benchmark.js</title>
+
+    <script src="scripts/prettify/prettify.js"> </script>
+    <script src="scripts/prettify/lang-css.js"> </script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <link type="text/css" rel="stylesheet" href="styles/prettify-tomorrow.css">
+    <link type="text/css" rel="stylesheet" href="styles/jsdoc-default.css">
+</head>
+
+<body>
+
+<div id="main">
+
+    <h1 class="page-title">Source: composables/benchmark.js</h1>
+
+    
+
+
+
+    
+    <section>
+        <article>
+            <pre class="prettyprint source linenums"><code>/**
+ * @fileoverview BenchmarkStore — reactive state for the benchmark run form,
+ * SSE progress stream, and poll fallback.
+ *
+ * @module composables/benchmark
+ */
+
+/**
+ * @typedef {Object} RunState
+ * @property {string}   modelId             - Selected model registry key.
+ * @property {string}   inputData           - Prompt text (SLM) or audio path (ASR).
+ * @property {string}   referenceTranscript - Ground-truth for WER (ASR only).
+ * @property {number}   warmupRuns          - Warm-up iterations to discard.
+ * @property {number}   timedRuns           - Iterations to measure.
+ * @property {boolean}  running             - `true` while a job is in progress.
+ * @property {number}   progress            - Completion percentage `0–100`.
+ * @property {string[]} log                 - Ordered progress messages.
+ */
+
+/**
+ * Manages the benchmark run lifecycle: form state, job submission, SSE streaming,
+ * and poll-based fallback when SSE is unavailable.
+ *
+ * Completion is signalled by setting {@link BenchmarkStore#lastResult}.
+ * `app.js` watches this ref to trigger cross-store effects (history refresh,
+ * tab switch) without creating a direct dependency between stores.
+ */
+class BenchmarkStore {
+  /**
+   * Creates a BenchmarkStore with default form state and null result signal.
+   */
+  constructor() {
+    /**
+     * Template ref for the log `&lt;div>` — used to auto-scroll to the latest entry.
+     * @type {Ref} Bound to an `HTMLElement` or `null`.
+     */
+    this.logEl = ref(null);
+
+    /**
+     * Set to the completed {@link BenchmarkResult} when a job finishes.
+     * Remains `null` between runs. Watched by `app.js`.
+     *
+     * @type {Ref} Holds a {@link BenchmarkResult} or `null`.
+     */
+    this.lastResult = ref(null);
+
+    /**
+     * Reactive run form state.
+     * @type {Ref} Holds a {@link RunState} object.
+     */
+    this.run = ref({
+      modelId:             '',
+      inputData:           '',
+      referenceTranscript: '',
+      warmupRuns:          2,
+      timedRuns:           5,
+      running:             false,
+      progress:            0,
+      log:                 [],
+    });
+  }
+
+  // ------------------------------------------------------------------
+  // Actions
+  // ------------------------------------------------------------------
+
+  /**
+   * Reset input fields when the user selects a different model.
+   * Clears `inputData` and `referenceTranscript` to avoid sending stale data.
+   */
+  onModelChange() {
+    this.run.value.inputData           = '';
+    this.run.value.referenceTranscript = '';
+  }
+
+  /**
+   * Submit the benchmark form, open an SSE stream for live progress, and
+   * fall back to polling if the stream fails.
+   *
+   * Sets `run.running = true` for the duration and writes progress messages
+   * to `run.log`. On success, sets {@link BenchmarkStore#lastResult} which
+   * triggers the watcher in `app.js`.
+   *
+   * @returns {Promise&lt;void>}
+   */
+  async start() {
+    this.run.value.running  = true;
+    this.run.value.progress = 0;
+    this.run.value.log      = [];
+    this.lastResult.value   = null;
+
+    let jobId;
+    try {
+      const resp = await API.startBenchmark({
+        model_id:             this.run.value.modelId,
+        input_data:           this.run.value.inputData,
+        warmup_runs:          this.run.value.warmupRuns,
+        timed_runs:           this.run.value.timedRuns,
+        reference_transcript: this.run.value.referenceTranscript || '',
+      });
+      jobId = resp.job_id;
+    } catch (e) {
+      this.run.value.log.push('Error starting job: ' + e.message);
+      this.run.value.running = false;
+      return;
+    }
+
+    const es         = API.streamJob(jobId);
+    const totalSteps = this.run.value.warmupRuns + this.run.value.timedRuns + 2;
+    let stepsDone    = 0;
+
+    es.onmessage = (evt) => {
+      const event = JSON.parse(evt.data);
+      if (event.type === 'progress') {
+        this.run.value.log.push(event.message);
+        stepsDone++;
+        this.run.value.progress = Math.min(97, Math.round((stepsDone / totalSteps) * 100));
+        nextTick(() => {
+          if (this.logEl.value) this.logEl.value.scrollTop = this.logEl.value.scrollHeight;
+        });
+      } else if (event.type === 'done') {
+        this.run.value.progress = 100;
+        this.run.value.running  = false;
+        this.run.value.log.push('Done.');
+        this.lastResult.value   = event.result;
+        es.close();
+      } else if (event.type === 'error') {
+        this.run.value.log.push('ERROR: ' + event.message);
+        this.run.value.running = false;
+        es.close();
+      }
+    };
+
+    es.onerror = () => {
+      this.run.value.log.push('SSE lost — polling…');
+      es.close();
+      this._poll(jobId);
+    };
+  }
+
+  // ------------------------------------------------------------------
+  // Private
+  // ------------------------------------------------------------------
+
+  /**
+   * Poll the job status endpoint every 2 seconds until the job reaches
+   * a terminal state (`"done"` or `"failed"`).
+   * Used as a fallback when the SSE connection drops.
+   *
+   * @param {string} jobId - UUID of the running job.
+   * @returns {Promise&lt;void>}
+   * @private
+   */
+  async _poll(jobId) {
+    while (true) {
+      await new Promise(r => setTimeout(r, 2000));
+      try {
+        const job = await API.getJob(jobId);
+        this.run.value.log.push('status: ' + job.status);
+        if (job.status === 'done') {
+          this.run.value.running = false;
+          this.lastResult.value  = job.result;
+          return;
+        }
+        if (job.status === 'failed') {
+          this.run.value.log.push('FAILED: ' + job.error);
+          this.run.value.running = false;
+          return;
+        }
+      } catch (e) { /* keep polling */ }
+    }
+  }
+}
+</code></pre>
+        </article>
+    </section>
+
+
+
+
+</div>
+
+<nav>
+    <h2><a href="index.html">Home</a></h2><h3>Modules</h3><ul><li><a href="module-api.html">api</a></li><li><a href="module-app.html">app</a></li><li><a href="module-composables_benchmark.html">composables/benchmark</a></li><li><a href="module-composables_chart.html">composables/chart</a></li><li><a href="module-composables_compare.html">composables/compare</a></li><li><a href="module-composables_history.html">composables/history</a></li><li><a href="module-composables_models.html">composables/models</a></li></ul><h3>Namespaces</h3><ul><li><a href="module-api-API.html">API</a></li></ul><h3>Classes</h3><ul><li><a href="module-composables_benchmark-BenchmarkStore.html">BenchmarkStore</a></li><li><a href="module-composables_chart-ChartStore.html">ChartStore</a></li><li><a href="module-composables_compare-CompareStore.html">CompareStore</a></li><li><a href="module-composables_history-HistoryStore.html">HistoryStore</a></li><li><a href="module-composables_models-ModelsStore.html">ModelsStore</a></li></ul>
+</nav>
+
+<br class="clear">
+
+<footer>
+    Documentation generated by <a href="https://github.com/jsdoc/jsdoc">JSDoc 4.0.5</a> on Sun Mar 08 2026 11:02:25 GMT+0100 (Central European Standard Time)
+</footer>
+
+<script> prettyPrint(); </script>
+<script src="scripts/linenumber.js"> </script>
+</body>
+</html>

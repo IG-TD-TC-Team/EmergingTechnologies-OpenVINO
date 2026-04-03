@@ -16,12 +16,12 @@
 import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
-export function AudioSourceBadge({ sourceKey, sourceLabel, canToggle, onPress }) {
+export function AudioSourceBadge({ sourceKey, sourceLabel, canToggle, onPress, style }) {
     const isUsb = sourceKey === 'usb';
 
     return (
         <TouchableOpacity
-            style={[styles.badge, isUsb ? styles.badgeUsb : styles.badgeBuiltin]}
+            style={[styles.badge, isUsb ? styles.badgeUsb : styles.badgeBuiltin, style]}
             onPress={canToggle ? onPress : undefined}
             activeOpacity={canToggle ? 0.7 : 1}
             accessibilityLabel={canToggle ? `Active source: ${sourceLabel}. Tap to switch.` : `Active source: ${sourceLabel}`}

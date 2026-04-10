@@ -24,6 +24,8 @@ import { getStorage } from '../repositories';
 import { Session, SessionStatus } from '../models/Session';
 import StorageKeys from '../constants/storageKeys';
 import { capabilities } from '../config/capabilities';
+// Dynamic import to avoid circular dependency — ShiftCleanupService → repositories → ...
+const getShiftCleanupService = () => require('./audio/ShiftCleanupService').default;
 
 class SessionService {
   // Cache for active session to reduce database queries
@@ -160,6 +162,9 @@ class SessionService {
         console.warn('[SessionService] No active shift to end');
         return null;
       }
+
+      // Purge all audio chunks for this session before closing (zero retention policy)
+      await getShiftCleanupService().purgeSessionAudio(activeSession.session_id);
 
       const storage = await getStorage();
 

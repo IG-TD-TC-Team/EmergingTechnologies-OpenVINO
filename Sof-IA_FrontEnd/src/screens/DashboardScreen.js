@@ -19,6 +19,8 @@ import { SvgXml } from 'react-native-svg';
 import DashboardPresenter from '../presenters/DashboardPresenter';
 import { AudioSourceBadge, MicInputIcon } from './AudioSourceBadge';
 import { MicPermissionBanner } from './MicPermissionBanner';
+import MicButton from './MicButton';
+import { useRecordingContext } from '../contexts/RecordingContext';
 
 // --- SVG icons ---
 
@@ -58,14 +60,23 @@ function DashboardScreen({ navigation }) {
     canToggle: false,
   });
   const [micStatus, setMicStatus] = useState('undetermined');
-  const [isRecording, setRecording] = useState(false);
   const [beds, setBeds] = useState([]);
   const [bedsLoading, setBedsLoading] = useState(true);
+
+  // Recording state lives in context so RecordingIndicator in App.js stays in sync
+  const { isRecording, setIsRecording, setConnectionStatus } = useRecordingContext();
 
   const presenterRef = useRef(null);
 
   useEffect(() => {
-    const view = { setAudioSource, setMicStatus, setRecording, setBeds, setBedsLoading };
+    const view = {
+      setAudioSource,
+      setMicStatus,
+      setRecording: setIsRecording,
+      setConnectionStatus,
+      setBeds,
+      setBedsLoading,
+    };
     const presenter = new DashboardPresenter(view);
     presenterRef.current = presenter;
     presenter.mount();
@@ -144,14 +155,11 @@ function DashboardScreen({ navigation }) {
           <Text style={styles.barLabel}>{audioSource.sourceLabel}</Text>
         </View>
 
-        <TouchableOpacity
-          style={[styles.micButton, isRecording && styles.micButtonRecording]}
+        <MicButton
+          isRecording={isRecording}
+          isDisabled={micStatus === 'blocked'}
           onPress={() => presenterRef.current?.onMicPress()}
-          disabled={micStatus === 'blocked'}
-          accessibilityLabel={isRecording ? 'Stop recording' : 'Start recording'}
-        >
-          <View style={styles.micButtonInner} />
-        </TouchableOpacity>
+        />
 
         {/* Speaker — AI volume, disabled in v1 (US7 spec) */}
         <View style={[styles.barItem, styles.barItemDisabled]}>
@@ -272,16 +280,6 @@ const styles = StyleSheet.create({
   barItemDisabled: { opacity: 0.4 },
   barLabel: { fontSize: 10, color: '#5F5E5A' },
   barLabelDisabled: { color: '#B4B2A9' },
-  micButton: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: '#1D9E75',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  micButtonRecording: { backgroundColor: '#A32D2D' },
-  micButtonInner: { width: 22, height: 22, borderRadius: 11, backgroundColor: '#fff' },
   speakerPlaceholder: { width: 24, height: 24, borderRadius: 4, backgroundColor: '#B4B2A9' },
 });
 

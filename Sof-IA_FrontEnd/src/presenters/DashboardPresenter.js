@@ -182,7 +182,7 @@ export default class DashboardPresenter {
 
         if (flushed) {
             // Queue clear — proceed straight to cleanup (T5)
-            this._proceedWithCleanup(navigation);
+            await this._proceedWithCleanup(navigation);
         } else {
             // Still offline — let nurse decide
             this._pendingNavigation = navigation;
@@ -195,9 +195,9 @@ export default class DashboardPresenter {
         this._pendingNavigation = null;
     }
 
-    onOfflineGateForceDelete(navigation) {
+    async onOfflineGateForceDelete(navigation) {
         this._view.setOfflineGateVisible(false);
-        this._proceedWithCleanup(navigation);
+        await this._proceedWithCleanup(navigation);
     }
 
     async _attemptQueueFlush() {

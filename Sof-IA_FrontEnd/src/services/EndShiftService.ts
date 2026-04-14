@@ -232,7 +232,6 @@ class EndShiftService {
 
   /** Web — revoke object URLs and clear the offline_queue IndexedDB store. */
   private async _deleteWebBlobs(recordings: any[], errors: string[]): Promise<void> {
-    // Revoke any blob: object URLs that are still held in memory.
     for (const rec of recordings) {
       if (rec.file_path?.startsWith('blob:')) {
         try {
@@ -243,30 +242,40 @@ class EndShiftService {
       }
     }
 
-    // Clear the offline_queue IndexedDB store (audio chunk queue — planned for T1 full impl).
-    // If the store doesn't exist yet the error is silently swallowed.
+    // Clear the offline_queue IndexedDB store (audio chunk queue — planned store).
+    // If the store doesn't exist yet the operation is silently skipped.
     try {
       const db = await this._openOfflineQueueDb();
       if (!db) return;
 
       await new Promise<void>((resolve, reject) => {
-        if (!db.objectStoreNames.contains('offline_queue')) { resolve(); return; }
+        if (!db.objectStoreNames.contains('offline_queue')) { db.close(); resolve(); return; }
         const tx = db.transaction('offline_queue', 'readwrite');
         const req = tx.objectStore('offline_queue').clear();
         req.onsuccess = () => { db.close(); resolve(); };
         req.onerror = () => { db.close(); reject(req.error); };
       });
     } catch {
-      // offline_queue store not yet created — nothing to clear.
+      // Store not yet created — nothing to clear.
     }
   }
 
+  /**
+   * Opens the offline_queue IndexedDB database.
+   * Resolves to null if IDB is unavailable or the open request times out.
+   * The timeout prevents the cleanup from hanging in environments where
+   * IDB events do not fire (e.g. unit tests without full IDB emulation).
+   */
   private _openOfflineQueueDb(): Promise<IDBDatabase | null> {
     return new Promise((resolve) => {
       if (typeof indexedDB === 'undefined') { resolve(null); return; }
+
+      // Safety valve: if onsuccess/onerror never fire, don't block cleanup.
+      const timeout = setTimeout(() => resolve(null), 500);
+
       const req = indexedDB.open('offline_queue');
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => resolve(null);
+      req.onsuccess = () => { clearTimeout(timeout); resolve(req.result); };
+      req.onerror  = () => { clearTimeout(timeout); resolve(null); };
     });
   }
 

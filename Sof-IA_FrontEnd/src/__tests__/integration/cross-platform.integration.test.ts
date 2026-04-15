@@ -195,7 +195,7 @@ describe('Cross-Platform Integration Tests - US17', () => {
   });
 
   describe('Error Handling', () => {
-    it('should handle missing native modules gracefully', () => {
+    it('should handle missing native modules gracefully', async () => {
       // If we're on web, native modules should not crash
       if (capabilities.isWeb) {
         // PermissionsService should handle web gracefully
@@ -204,9 +204,13 @@ describe('Cross-Platform Integration Tests - US17', () => {
         expect(PermissionsService.check).toBeDefined();
         expect(PermissionsService.request).toBeDefined();
 
-        // These should return 'granted' immediately on web
-        expect(PermissionsService.check()).resolves.toBe('granted');
-        expect(PermissionsService.request()).resolves.toBe('granted');
+        // Web now uses real Chrome APIs; in a Node test env navigator is absent
+        // so valid fallback states are returned without throwing.
+        const validStates = ['granted', 'undetermined', 'denied', 'blocked'];
+        const checkStatus = await PermissionsService.check();
+        const requestStatus = await PermissionsService.request();
+        expect(validStates).toContain(checkStatus);
+        expect(validStates).toContain(requestStatus);
       }
     });
 

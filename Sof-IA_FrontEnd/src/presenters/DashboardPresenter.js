@@ -15,6 +15,7 @@ import { AppState } from 'react-native';
 import AudioSourceResolver from '../services/audio/AudioSourceResolver';
 import PermissionsService from '../services/PermissionsService';
 import SessionService from '../services/SessionService';
+import EndShiftService from '../services/EndShiftService';
 import { getStorage } from '../repositories';
 
 export default class DashboardPresenter {
@@ -23,6 +24,7 @@ export default class DashboardPresenter {
         this._interval = null;
         this._appStateSub = null;
         this._isRecording = false;
+        this._pendingNavigation = null;
     }
 
     // ─── Lifecycle ────────────────────────────────────────────────────────────
@@ -158,5 +160,93 @@ export default class DashboardPresenter {
 
     onBedPress(patient, navigation) {
         navigation.navigate('BedDetails', { patient });
+    }
+
+    // ─── End Shift ────────────────────────────────────────────────────────────
+
+    onEndShift(_navigation) {
+        this._view.setConfirmVisible(true);
+    }
+
+    onEndShiftCancel() {
+        this._view.setConfirmVisible(false);
+    }
+
+    async onEndShiftConfirmed(navigation) {
+        this._view.setConfirmVisible(false);
+        this._view.setFlushSyncing(true);
+
+        const flushed = await this._attemptQueueFlush();
+
+        this._view.setFlushSyncing(false);
+
+        if (flushed) {
+            // Queue clear — proceed straight to cleanup (T5)
+            await this._proceedWithCleanup(navigation);
+        } else {
+            // Still offline — let nurse decide
+            this._pendingNavigation = navigation;
+            this._view.setOfflineGateVisible(true);
+        }
+    }
+
+    onOfflineGateWait() {
+        this._view.setOfflineGateVisible(false);
+        this._pendingNavigation = null;
+    }
+
+    async onOfflineGateForceDelete(navigation) {
+        this._view.setOfflineGateVisible(false);
+        await this._proceedWithCleanup(navigation);
+    }
+
+    async _attemptQueueFlush() {
+        const sessionId = await SessionService.getActiveSessionId();
+        if (!sessionId) return true;
+
+        const { success } = await EndShiftService.flushQueue(sessionId);
+        return success;
+    }
+
+    async _proceedWithCleanup(navigation) {
+        this._pendingNavigation = null;
+
+        const sessionId = await SessionService.getActiveSessionId();
+
+        this._view.setCleanupProgress(true);
+        const result = await EndShiftService.run(sessionId ?? '');
+        this._view.setCleanupProgress(false);
+
+        this._view.setCleanupResult({
+            success: result.success,
+            failedItems: result.failedItems,
+            timestamp: new Date().toISOString(),
+        });
+    }
+
+    onSuccessDismiss(navigation) {
+        this._view.setCleanupResult(null);
+
+        // Stop any in-progress recording before leaving
+        if (this._isRecording) {
+            this._isRecording = false;
+            this._view.setRecording(false);
+        }
+
+        // Reset the stack to ModeSelection so the nurse cannot navigate back
+        // to the now-wiped Dashboard session.
+        navigation.reset({
+            index: 0,
+            routes: [{ name: 'ModeSelection' }],
+        });
+    }
+
+    onCleanupErrorDismiss() {
+        this._view.setCleanupResult(null);
+    }
+
+    async onRetryCleanup(navigation) {
+        this._view.setCleanupResult(null);
+        await this._proceedWithCleanup(navigation);
     }
 }

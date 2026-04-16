@@ -51,15 +51,33 @@ const bedSvg = `<svg width="43" height="43" viewBox="0 0 48 48" fill="none" xmln
   <path d="M4 32V12H8V24H28V16H40C42.2 16 44 17.8 44 20V32H40V28H8V32H4ZM14 22C11.8 22 10 20.2 10 18C10 15.8 11.8 14 14 14C16.2 14 18 15.8 18 18C18 20.2 16.2 22 14 22Z" fill="#1D1B20"/>
 </svg>`;
 
+const bedActiveSvg = `<svg width="43" height="43" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M4 32V12H8V24H28V16H40C42.2 16 44 17.8 44 20V32H40V28H8V32H4ZM14 22C11.8 22 10 20.2 10 18C10 15.8 11.8 14 14 14C16.2 14 18 15.8 18 18C18 20.2 16.2 22 14 22Z" fill="#1D9E75"/>
+</svg>`;
+
+// Close icon for the active patient chip
+const closeSvg = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M19 6.41L17.59 5L12 10.59L6.41 5L5 6.41L10.59 12L5 17.59L6.41 19L12 13.41L17.59 19L19 17.59L13.41 12L19 6.41Z" fill="#1D9E75"/>
+</svg>`;
+
 // --- Bed Card Component ---
 
-function BedCard({ bed, name, onPress }) {
+function BedCard({ bed, name, onPress, isActive }) {
   return (
-    <TouchableOpacity style={styles.bedCard} onPress={onPress} activeOpacity={0.7}>
-      <SvgXml xml={bedSvg} width={43} height={43} />
-      <View style={styles.bedChip}>
-        <Text style={styles.bedChipText} numberOfLines={1}>
-          {`Bed ${bed}: "${name}"`}
+    <TouchableOpacity
+      style={[styles.bedCard, isActive && styles.bedCardActive]}
+      onPress={onPress}
+      activeOpacity={0.7}
+      accessibilityLabel={`Bed ${bed}: ${name || 'unnamed'}${isActive ? ', active' : ''}`}
+      accessibilityState={{ selected: isActive }}
+    >
+      <SvgXml xml={isActive ? bedActiveSvg : bedSvg} width={43} height={43} />
+      <View style={[styles.bedChip, isActive && styles.bedChipActive]}>
+        <Text
+          style={[styles.bedChipText, isActive && styles.bedChipTextActive]}
+          numberOfLines={1}
+        >
+          {`Bed ${bed}${name ? `: "${name}"` : ''}`}
         </Text>
       </View>
     </TouchableOpacity>
@@ -84,6 +102,8 @@ function DashboardScreen({ navigation }) {
   const [cleanupProgress, setCleanupProgress] = useState(false);
   // null → hidden; { success, failedItems, timestamp } → success or error view
   const [cleanupResult, setCleanupResult] = useState(null);
+  // US21 — active patient context: { id, name, bed } | null
+  const [activePatient, setActivePatient] = useState(null);
 
   const presenterRef = useRef(null);
 
@@ -99,6 +119,7 @@ function DashboardScreen({ navigation }) {
       setOfflineGateVisible,
       setCleanupProgress,
       setCleanupResult,
+      setActivePatient,
     };
     const presenter = new DashboardPresenter(view);
     presenterRef.current = presenter;
@@ -176,12 +197,33 @@ function DashboardScreen({ navigation }) {
               <BedCard
                 bed={item.bed}
                 name={item.name}
-                onPress={() => presenterRef.current?.onBedPress(item, navigation)}
+                isActive={activePatient?.id === item.id}
+                onPress={() => presenterRef.current?.onBedPress(item)}
               />
             )}
           />
         )}
       </View>
+
+      {/* US21 — active patient chip (shown above the bottom bar when a bed is selected) */}
+      {activePatient && (
+        <View style={styles.activePatientRow}>
+          <View style={styles.activePatientChip}>
+            <Text style={styles.activePatientText} numberOfLines={1}>
+              {activePatient.bed ? `Bed ${activePatient.bed}` : 'New bed'}
+              {activePatient.name ? ` · ${activePatient.name}` : ''}
+            </Text>
+            <TouchableOpacity
+              style={styles.activePatientClearBtn}
+              onPress={() => presenterRef.current?.onClearActivePatient()}
+              accessibilityLabel="Clear active patient"
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <SvgXml xml={closeSvg} width={16} height={16} />
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
 
       {/* End Shift — confirmation dialog */}
       <Modal
@@ -479,6 +521,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     width: '30%',
   },
+  // US21 — active bed highlight
+  bedCardActive: {
+    opacity: 1,
+  },
   bedChip: {
     borderWidth: 1,
     borderColor: '#CAC4D0',
@@ -487,11 +533,50 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     marginTop: 4,
   },
+  bedChipActive: {
+    borderColor: '#1D9E75',
+    backgroundColor: '#E8F7F2',
+  },
   bedChipText: {
     fontSize: 12,
     fontWeight: '500',
     color: '#1D1B20',
     textAlign: 'center',
+  },
+  bedChipTextActive: {
+    color: '#1D9E75',
+  },
+  // ─── US21 active patient chip ────────────────────────────
+  activePatientRow: {
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderTopWidth: 0.5,
+    borderTopColor: '#D3D1C7',
+  },
+  activePatientChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#E8F7F2',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#1D9E75',
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    gap: 8,
+    maxWidth: '80%',
+  },
+  activePatientText: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: '#1D9E75',
+    flexShrink: 1,
+  },
+  activePatientClearBtn: {
+    width: 20,
+    height: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   // ─── Bottom bar ──────────────────────────────────────────
   bottomBar: {

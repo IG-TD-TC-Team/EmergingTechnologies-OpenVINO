@@ -7,8 +7,9 @@
  *   setAudioSource({ sourceKey, sourceLabel, canToggle })
  *   setMicStatus(status)
  *   setRecording(isRecording)
- *   setBeds(beds)         — array of { id, bed, name, status }
- *   setBedsLoading(bool)  — loading state for bed grid
+ *   setBeds(beds)              — array of { id, bed, name, status }
+ *   setBedsLoading(bool)       — loading state for bed grid
+ *   setActivePatient(patient)  — US21: { id, name, bed } | null
  */
 
 import { AppState } from 'react-native';
@@ -25,6 +26,8 @@ export default class DashboardPresenter {
         this._appStateSub = null;
         this._isRecording = false;
         this._pendingNavigation = null;
+        // US21 — active patient context for transcription mapping
+        this._activePatient = null;
     }
 
     // ─── Lifecycle ────────────────────────────────────────────────────────────
@@ -90,8 +93,50 @@ export default class DashboardPresenter {
         const status = await PermissionsService.ensure();
         this._view.setMicStatus(status);
         if (status !== 'granted') return;
+
+        // US21: no bed selected → auto-create one and make it active
+        if (!this._activePatient) {
+            const patient = await this._autoCreatePatient();
+            if (patient) {
+                this._activePatient = { id: patient.id, name: patient.name, bed: patient.bed };
+                this._view.setActivePatient(this._activePatient);
+                await this._loadBeds();
+            }
+        }
+
         this._isRecording = !this._isRecording;
         this._view.setRecording(this._isRecording);
+    }
+
+    async _autoCreatePatient() {
+        try {
+            const sessionId = await SessionService.getActiveSessionId();
+            if (!sessionId) return null;
+
+            const storage = await getStorage();
+            const existing = await storage.queryBySession('patients', sessionId);
+            const nextBed = String(existing.length + 1);
+            const now = new Date().toISOString();
+
+            return await storage.create('patients', {
+                session_id: sessionId,
+                name: '',
+                bed: nextBed,
+                mrn: null,
+                date_of_birth: null,
+                status: 'active',
+                diagnosis: null,
+                allergies: null,
+                medications: null,
+                notes: null,
+                last_interaction_at: now,
+                note_count: 0,
+                recording_count: 0,
+            });
+        } catch (e) {
+            console.error('[DashboardPresenter] Failed to auto-create patient:', e);
+            return null;
+        }
     }
 
     async onRequestPermission() {
@@ -158,8 +203,31 @@ export default class DashboardPresenter {
         await storage.create('patients', { ...basePatient, name: 'Bob', bed: '2' });
     }
 
-    onBedPress(patient, navigation) {
-        navigation.navigate('BedDetails', { patient });
+    // US21 — tap a bed card to set it as the active patient context
+    onBedPress(patient) {
+        this._activePatient = { id: patient.id, name: patient.name, bed: patient.bed };
+        this._view.setActivePatient(this._activePatient);
+    }
+
+    // US21 — X button on the active patient chip resets context to none
+    onClearActivePatient() {
+        this._activePatient = null;
+        this._view.setActivePatient(null);
+    }
+
+    /**
+     * US21 — Returns hint fields to include in the transcription API request.
+     * The API uses these as soft hints to improve structuration confidence;
+     * they are not binding — the API can still detect other patients from speech.
+     *
+     * @returns {{ hint_patient_name?: string, hint_room?: string }}
+     */
+    getApiHints() {
+        if (!this._activePatient) return {};
+        return {
+            hint_patient_name: this._activePatient.name,
+            hint_room: this._activePatient.bed,
+        };
     }
 
     // ─── End Shift ────────────────────────────────────────────────────────────
@@ -231,6 +299,12 @@ export default class DashboardPresenter {
         if (this._isRecording) {
             this._isRecording = false;
             this._view.setRecording(false);
+        }
+
+        // Clear active patient — shift is over
+        if (this._activePatient) {
+            this._activePatient = null;
+            this._view.setActivePatient(null);
         }
 
         // Reset the stack to ModeSelection so the nurse cannot navigate back

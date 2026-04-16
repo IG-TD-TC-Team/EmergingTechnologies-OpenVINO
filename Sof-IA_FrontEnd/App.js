@@ -1,6 +1,7 @@
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useState } from 'react';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import AppNavigator from './src/navigation/AppNavigator';
 import { StorageFactory, LogLevel } from './src/repositories/adapters';
 import { CapabilitiesProvider } from './src/config/CapabilitiesContext';
@@ -59,11 +60,13 @@ export default function App() {
   }
 
   return (
-    <CapabilitiesProvider>
-      <RecordingProvider>
-        <AppContent />
-      </RecordingProvider>
-    </CapabilitiesProvider>
+    <SafeAreaProvider>
+      <CapabilitiesProvider>
+        <RecordingProvider>
+          <AppContent />
+        </RecordingProvider>
+      </CapabilitiesProvider>
+    </SafeAreaProvider>
   );
 }
 

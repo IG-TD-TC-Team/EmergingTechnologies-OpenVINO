@@ -7,13 +7,14 @@
  *   setAudioSource({ sourceKey, sourceLabel, canToggle })
  *   setMicStatus(status)
  *   setRecording(isRecording)
- *   setBeds(beds)              — array of { id, bed, name, status }
- *   setBedsLoading(bool)       — loading state for bed grid
- *   setActivePatient(patient)  — US21: { id, name, bed } | null
+ *   setBeds(beds)         — array of { id, bed, name, status }
+ *   setBedsLoading(bool)  — loading state for bed grid
  */
 
 import { AppState } from 'react-native';
 import AudioSourceResolver from '../services/audio/AudioSourceResolver';
+import WebRecorderService from '../services/audio/WebRecorderService';
+import ServiceWorkerManager from '../services/audio/ServiceWorkerManager';
 import PermissionsService from '../services/PermissionsService';
 import SessionService from '../services/SessionService';
 import EndShiftService from '../services/EndShiftService';
@@ -26,7 +27,6 @@ export default class DashboardPresenter {
         this._appStateSub = null;
         this._isRecording = false;
         this._pendingNavigation = null;
-        // US21 — active patient context for transcription mapping
         this._activePatient = null;
     }
 
@@ -36,6 +36,17 @@ export default class DashboardPresenter {
         await this._resolveAudioSource();
         await this._checkPermission();
         await this._loadBeds();
+
+        // On web, tell the view whether this browser supports recording.
+        // False for anything other than Chrome (no MediaRecorder / codec support).
+        if (Platform.OS === 'web') {
+            this._view.setBrowserSupported(WebRecorderService.isSupported());
+        }
+
+        // Register the Service Worker on web for background audio chunk uploads.
+        if (WebRecorderService.isSupported()) {
+            ServiceWorkerManager.register().catch(() => {});
+        }
 
         // Poll every 3s — detects plug/unplug and resets override if USB gone
         this._interval = setInterval(() => this._resolveAudioSource(), 3000);
@@ -93,6 +104,25 @@ export default class DashboardPresenter {
         const status = await PermissionsService.ensure();
         this._view.setMicStatus(status);
         if (status !== 'granted') return;
+
+        if (this._isRecording) {
+            if (WebRecorderService.isSupported()) WebRecorderService.stop();
+            this._isRecording = false;
+            this._view.setRecording(false);
+        } else {
+            if (WebRecorderService.isSupported()) {
+                try {
+                    const sessionId = await SessionService.getActiveSessionId();
+                    await WebRecorderService.start(sessionId ?? '');
+                } catch (err) {
+                    console.error('[DashboardPresenter] Failed to start web recording:', err);
+                    return;
+                }
+            }
+            this._isRecording = true;
+            this._view.setRecording(true);
+        }
+
 
         // US21: no bed selected → auto-create one and make it active
         if (!this._activePatient) {
@@ -300,8 +330,7 @@ export default class DashboardPresenter {
             this._isRecording = false;
             this._view.setRecording(false);
         }
-
-        // Clear active patient — shift is over
+// Clear active patient — shift is over
         if (this._activePatient) {
             this._activePatient = null;
             this._view.setActivePatient(null);

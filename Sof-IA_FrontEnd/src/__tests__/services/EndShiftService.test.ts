@@ -11,6 +11,9 @@ import EndShiftService from '../../services/EndShiftService';
 
 // ─── Module mocks (hoisted before imports) ────────────────────────────────────
 
+jest.mock('react-native', () => ({
+  Platform: { OS: 'android', select: jest.fn((obj: any) => obj.android ?? obj.default) },
+}));
 jest.mock('../../repositories', () => ({ getStorage: jest.fn() }));
 jest.mock('../../services/SessionService', () => ({
   __esModule: true,

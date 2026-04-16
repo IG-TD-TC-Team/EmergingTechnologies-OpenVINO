@@ -1,17 +1,16 @@
 /**
  * PermissionsService
  *
- * Handles all microphone permission logic for Android.
- * Chrome Web: always returns 'granted' (covered by getUserMedia in US16).
+ * Handles microphone permission logic for Android and Chrome Web.
  *
  * Permission states:
  *   'undetermined' — never asked
  *   'granted'      — approved
- *   'denied'       — refused, can ask again
- *   'blocked'      — permanently denied, must open OS Settings
+ *   'denied'       — refused, can ask again (Android only)
+ *   'blocked'      — permanently denied, must open OS/browser settings
  *
- * Requires: npx expo install expo-av expo-linking
- * Note: Uses dynamic imports to avoid build errors on web
+ * Chrome Web: uses navigator.permissions + navigator.mediaDevices.getUserMedia.
+ * Android: uses expo-av Audio permissions (dynamic import to avoid web bundle).
  */
 
 import { capabilities } from '../config/capabilities';
@@ -23,12 +22,14 @@ function mapExpoStatus(status, canAskAgain) {
 }
 
 const PermissionsService = {
-    /** Check current status WITHOUT prompting. Call on launch and foreground. */
+    /**
+     * Check current mic permission status WITHOUT prompting.
+     * Call on mount and whenever the app returns to foreground.
+     */
     async check() {
-        if (capabilities.isWeb) return 'granted';
+        if (capabilities.isWeb) return this._webCheck();
 
         try {
-            // Dynamic import to avoid bundling expo-av on web
             const { Audio } = await import('expo-av');
             const { status, canAskAgain } = await Audio.getPermissionsAsync();
             return mapExpoStatus(status, canAskAgain);
@@ -38,12 +39,15 @@ const PermissionsService = {
         }
     },
 
-    /** Show the native Android permission dialog. */
+    /**
+     * Trigger the permission dialog.
+     * Chrome: shows the browser mic prompt via getUserMedia.
+     * Android: shows the OS permission dialog via expo-av.
+     */
     async request() {
-        if (capabilities.isWeb) return 'granted';
+        if (capabilities.isWeb) return this._webRequest();
 
         try {
-            // Dynamic import to avoid bundling expo-av on web
             const { Audio } = await import('expo-av');
             const { status, canAskAgain } = await Audio.requestPermissionsAsync();
             return mapExpoStatus(status, canAskAgain);
@@ -54,10 +58,10 @@ const PermissionsService = {
     },
 
     /**
-     * Main entry — call before starting any recording.
-     *   granted      → returns immediately, no dialog
-     *   blocked      → returns 'blocked', no dialog (caller shows Settings banner)
-     *   undetermined / denied → shows OS dialog, returns result
+     * Main entry point — call before starting any recording.
+     *   granted      → returns immediately, no dialog shown
+     *   blocked      → returns 'blocked', no dialog (caller shows settings banner)
+     *   undetermined → shows platform permission dialog, returns result
      */
     async ensure() {
         const current = await this.check();
@@ -66,21 +70,60 @@ const PermissionsService = {
         return this.request();
     },
 
-    /** Deep-link to Android app settings (for permanently blocked state). */
+    /**
+     * Open OS/browser settings so the nurse can un-block the mic.
+     * Android: deep-links to app settings via expo-linking.
+     * Chrome: no-op — browser settings cannot be opened programmatically;
+     *         MicPermissionBanner shows inline instructions instead.
+     */
     async openSettings() {
-        // Web doesn't have system settings to open
-        if (capabilities.isWeb) {
-            console.warn('[PermissionsService] openSettings() not available on web platform');
-            return;
-        }
+        if (capabilities.isWeb) return;
 
         try {
-            // Dynamic import to avoid bundling expo-linking on web
             const Linking = await import('expo-linking');
             await Linking.openSettings();
         } catch (error) {
             console.error('[PermissionsService] Failed to open settings:', error);
             throw new Error('Failed to open system settings');
+        }
+    },
+
+    // ─── Web (Chrome) helpers ──────────────────────────────────────────────────
+
+    /**
+     * Read current mic permission state via the Permissions API — no prompt.
+     * Maps Chrome states to the app's internal state vocabulary:
+     *   'granted' → 'granted'
+     *   'prompt'  → 'undetermined'
+     *   'denied'  → 'blocked'  (Chrome denials are persistent per-origin)
+     */
+    async _webCheck() {
+        try {
+            if (navigator?.permissions?.query) {
+                const result = await navigator.permissions.query({ name: 'microphone' });
+                if (result.state === 'granted') return 'granted';
+                if (result.state === 'denied') return 'blocked';
+                return 'undetermined'; // state === 'prompt'
+            }
+        } catch {
+            // Permissions API unavailable — conservative fallback
+        }
+        return 'undetermined';
+    },
+
+    /**
+     * Trigger the Chrome mic permission dialog via getUserMedia.
+     * Stops the stream immediately after grant — we only need the permission.
+     * Any refusal (denied or dismissed) is mapped to 'blocked' because Chrome
+     * persists the denial for the origin until the nurse changes it in Site Settings.
+     */
+    async _webRequest() {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            stream.getTracks().forEach((track) => track.stop());
+            return 'granted';
+        } catch {
+            return 'blocked';
         }
     },
 };

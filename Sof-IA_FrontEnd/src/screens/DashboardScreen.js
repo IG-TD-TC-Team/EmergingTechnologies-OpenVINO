@@ -8,6 +8,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
   FlatList,
   Modal,
   Pressable,
@@ -51,6 +52,14 @@ const bedSvg = `<svg width="43" height="43" viewBox="0 0 48 48" fill="none" xmln
   <path d="M4 32V12H8V24H28V16H40C42.2 16 44 17.8 44 20V32H40V28H8V32H4ZM14 22C11.8 22 10 20.2 10 18C10 15.8 11.8 14 14 14C16.2 14 18 15.8 18 18C18 20.2 16.2 22 14 22Z" fill="#1D1B20"/>
 </svg>`;
 
+const micSvg = `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M12 14C13.66 14 15 12.66 15 11V5C15 3.34 13.66 2 12 2C10.34 2 9 3.34 9 5V11C9 12.66 10.34 14 12 14ZM17.91 11C17.42 13.84 14.97 16 12 16C9.03 16 6.58 13.84 6.09 11H4.07C4.57 14.55 7.25 17.44 10.75 17.91V21H13.25V17.91C16.75 17.44 19.43 14.55 19.93 11H17.91Z" fill="white"/>
+</svg>`;
+
+const stopSvg = `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect x="6" y="6" width="12" height="12" rx="2" fill="white"/>
+</svg>`;
+
 // --- Bed Card Component ---
 
 function BedCard({ bed, name, onPress }) {
@@ -63,6 +72,59 @@ function BedCard({ bed, name, onPress }) {
         </Text>
       </View>
     </TouchableOpacity>
+  );
+}
+
+// --- Pulsing mic button ---
+
+function PulsingMicButton({ isRecording, disabled, onPress }) {
+  const pulseScale   = useRef(new Animated.Value(1)).current;
+  const pulseOpacity = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (isRecording) {
+      pulseOpacity.setValue(0.45);
+      const anim = Animated.loop(
+        Animated.sequence([
+          Animated.parallel([
+            Animated.timing(pulseScale,   { toValue: 1.75, duration: 900, useNativeDriver: true }),
+            Animated.timing(pulseOpacity, { toValue: 0,    duration: 900, useNativeDriver: true }),
+          ]),
+          Animated.parallel([
+            Animated.timing(pulseScale,   { toValue: 1,    duration: 0,   useNativeDriver: true }),
+            Animated.timing(pulseOpacity, { toValue: 0.45, duration: 0,   useNativeDriver: true }),
+          ]),
+        ])
+      );
+      anim.start();
+      return () => anim.stop();
+    } else {
+      pulseScale.setValue(1);
+      pulseOpacity.setValue(0);
+    }
+  }, [isRecording]);
+
+  return (
+    <View style={styles.micButtonWrapper}>
+      <Animated.View
+        style={[
+          styles.pulseRing,
+          { transform: [{ scale: pulseScale }], opacity: pulseOpacity },
+        ]}
+        pointerEvents="none"
+      />
+      <TouchableOpacity
+        style={[styles.micButton, isRecording && styles.micButtonRecording]}
+        onPress={onPress}
+        disabled={disabled}
+        accessibilityLabel={isRecording ? 'Stop recording' : 'Start recording'}
+      >
+        <SvgXml xml={isRecording ? stopSvg : micSvg} width={24} height={24} />
+      </TouchableOpacity>
+      {isRecording && (
+        <Text style={styles.recLabel}>Recording</Text>
+      )}
+    </View>
   );
 }
 
@@ -84,6 +146,8 @@ function DashboardScreen({ navigation }) {
   const [cleanupProgress, setCleanupProgress] = useState(false);
   // null → hidden; { success, failedItems, timestamp } → success or error view
   const [cleanupResult, setCleanupResult] = useState(null);
+  // true on native (always capable) and on Chrome; false on Firefox/Safari/Edge
+  const [browserSupported, setBrowserSupported] = useState(true);
 
   const presenterRef = useRef(null);
 
@@ -99,6 +163,7 @@ function DashboardScreen({ navigation }) {
       setOfflineGateVisible,
       setCleanupProgress,
       setCleanupResult,
+      setBrowserSupported,
     };
     const presenter = new DashboardPresenter(view);
     presenterRef.current = presenter;
@@ -136,6 +201,15 @@ function DashboardScreen({ navigation }) {
           <Text style={styles.endShiftLabel}>End shift</Text>
         </TouchableOpacity>
       </View>
+
+      {/* Chrome-only guard — shown on Firefox, Safari, Edge, etc. */}
+      {!browserSupported && (
+        <View style={styles.unsupportedBanner}>
+          <Text style={styles.unsupportedText}>
+            Audio recording requires Google Chrome. Please open this page in Chrome to use this feature.
+          </Text>
+        </View>
+      )}
 
       {/* US20 — permission banner */}
       <MicPermissionBanner
@@ -371,14 +445,11 @@ function DashboardScreen({ navigation }) {
           <Text style={styles.barLabel}>{audioSource.sourceLabel}</Text>
         </View>
 
-        <TouchableOpacity
-          style={[styles.micButton, isRecording && styles.micButtonRecording]}
+        <PulsingMicButton
+          isRecording={isRecording}
+          disabled={micStatus === 'blocked' || !browserSupported}
           onPress={() => presenterRef.current?.onMicPress()}
-          disabled={micStatus === 'blocked'}
-          accessibilityLabel={isRecording ? 'Stop recording' : 'Start recording'}
-        >
-          <View style={styles.micButtonInner} />
-        </TouchableOpacity>
+        />
 
         {/* Speaker — AI volume, disabled in v1 (US7 spec) */}
         <View style={[styles.barItem, styles.barItemDisabled]}>
@@ -432,6 +503,25 @@ const styles = StyleSheet.create({
     color: '#A32D2D',
     marginTop: 2,
     fontWeight: '500',
+  },
+  // ─── Unsupported browser banner ─────────────────────────
+  unsupportedBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFF8EC',
+    borderWidth: 0.5,
+    borderColor: '#E8A838',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginHorizontal: 16,
+    marginTop: 8,
+  },
+  unsupportedText: {
+    flex: 1,
+    fontSize: 13,
+    color: '#7A4B00',
+    lineHeight: 18,
   },
   // ─── Audio source ────────────────────────────────────────
   sourceRow: {
@@ -508,6 +598,17 @@ const styles = StyleSheet.create({
   barItemDisabled: { opacity: 0.4 },
   barLabel: { fontSize: 10, color: '#5F5E5A' },
   barLabelDisabled: { color: '#B4B2A9' },
+  micButtonWrapper: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pulseRing: {
+    position: 'absolute',
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#A32D2D',
+  },
   micButton: {
     width: 60,
     height: 60,
@@ -517,7 +618,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   micButtonRecording: { backgroundColor: '#A32D2D' },
-  micButtonInner: { width: 22, height: 22, borderRadius: 11, backgroundColor: '#fff' },
+  recLabel: {
+    fontSize: 10,
+    color: '#A32D2D',
+    fontWeight: '600',
+    marginTop: 4,
+    letterSpacing: 0.5,
+  },
   speakerPlaceholder: { width: 24, height: 24, borderRadius: 4, backgroundColor: '#B4B2A9' },
   // ─── End Shift dialog ────────────────────────────────────
   dialogBackdrop: {

@@ -80,6 +80,12 @@ class EndShiftService {
    */
   async flushQueue(sessionId: string): Promise<FlushResult> {
     try {
+      // ── Web: chunks are stored as Blobs in OfflineQueueDb, not audio_recordings ──
+      if (Platform.OS === 'web') {
+        return this._flushWebQueue(sessionId);
+      }
+
+      // ── Native: check audio_recordings + transcriptions tables ──────────────
       const storage = await getStorage();
 
       const [recordings, transcriptions] = await Promise.all([
@@ -104,11 +110,7 @@ class EndShiftService {
         return { success: true, pendingCount: 0 };
       }
 
-      // TODO: replace stub below with real API call once TranscriptionService is ready.
-      // const result = await TranscriptionService.uploadBatch(unsyncedRecordings);
-      // return { success: result.ok, pendingCount: result.remaining };
-
-      // Stub: report as offline whenever there are unsynced items.
+      // TODO: replace stub with real upload once TranscriptionService is ready.
       console.warn(
         `[EndShiftService] flushQueue: ${pendingCount} unsynced items — no API available yet`
       );
@@ -116,6 +118,27 @@ class EndShiftService {
 
     } catch (e: any) {
       console.error('[EndShiftService] flushQueue error:', e);
+      return { success: false, pendingCount: -1 };
+    }
+  }
+
+  private async _flushWebQueue(sessionId: string): Promise<FlushResult> {
+    try {
+      const OfflineQueueDb = require('./audio/OfflineQueueDb').default;
+      const ChunkUploadService = require('./ChunkUploadService').default;
+
+      const pendingCount: number = await OfflineQueueDb.countBySession(sessionId);
+
+      if (pendingCount === 0) {
+        return { success: true, pendingCount: 0 };
+      }
+
+      await ChunkUploadService.flushSession(sessionId);
+
+      const remaining: number = await OfflineQueueDb.countBySession(sessionId);
+      return { success: remaining === 0, pendingCount: remaining };
+    } catch (e: any) {
+      console.error('[EndShiftService] _flushWebQueue error:', e);
       return { success: false, pendingCount: -1 };
     }
   }

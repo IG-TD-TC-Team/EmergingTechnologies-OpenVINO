@@ -11,7 +11,7 @@
  *   setBedsLoading(bool)  — loading state for bed grid
  */
 
-import { AppState } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import AudioSourceResolver from '../services/audio/AudioSourceResolver';
 import WebRecorderService from '../services/audio/WebRecorderService';
 import ServiceWorkerManager from '../services/audio/ServiceWorkerManager';
@@ -133,9 +133,6 @@ export default class DashboardPresenter {
                 await this._loadBeds();
             }
         }
-
-        this._isRecording = !this._isRecording;
-        this._view.setRecording(this._isRecording);
     }
 
     async _autoCreatePatient() {

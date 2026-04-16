@@ -9,6 +9,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  Modal,
+  Pressable,
   SafeAreaView,
   StyleSheet,
   Text,
@@ -28,8 +30,23 @@ const arrowBackSvg = `<svg width="24" height="24" viewBox="0 0 24 24" fill="none
   <path d="M20 11H7.83L13.42 5.41L12 4L4 12L12 20L13.41 18.59L7.83 13H20V11Z" fill="#1D1B20"/>
 </svg>`;
 
+// Door/exit icon for End Shift
+const endShiftSvg = `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M10.09 15.59L11.5 17L16.5 12L11.5 7L10.09 8.41L12.67 11H3V13H12.67L10.09 15.59ZM19 3H5C3.89 3 3 3.9 3 5V9H5V5H19V19H5V15H3V19C3 20.1 3.89 21 5 21H19C20.1 21 21 20.1 21 19V5C21 3.9 20.1 3 19 3Z" fill="#A32D2D"/>
+</svg>`;
+
 const briefcaseSvg = `<svg width="48" height="44" viewBox="0 0 44 40" fill="none" xmlns="http://www.w3.org/2000/svg">
   <path d="M30 38V6C30 4.93913 29.5786 3.92172 28.8284 3.17157C28.0783 2.42143 27.0609 2 26 2H18C16.9391 2 15.9217 2.42143 15.1716 3.17157C14.4214 3.92172 14 4.93913 14 6V38M6 10H38C40.2091 10 42 11.7909 42 14V34C42 36.2091 40.2091 38 38 38H6C3.79086 38 2 36.2091 2 34V14C2 11.7909 3.79086 10 6 10Z" stroke="#1E1E1E" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>`;
+
+const checkCircleSvg = `<svg width="56" height="56" viewBox="0 0 56 56" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <circle cx="28" cy="28" r="28" fill="#E8F7F2"/>
+  <path d="M18 28.5L24.5 35L38 21" stroke="#1D9E75" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>`;
+
+const warningTriangleSvg = `<svg width="56" height="56" viewBox="0 0 56 56" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <circle cx="28" cy="28" r="28" fill="#FEF3EE"/>
+  <path d="M28 20V30M28 35V36M18 38H38L28 18L18 38Z" stroke="#C45C2E" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>`;
 
 const bedSvg = `<svg width="43" height="43" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -62,6 +79,12 @@ function DashboardScreen({ navigation }) {
   const [micStatus, setMicStatus] = useState('undetermined');
   const [beds, setBeds] = useState([]);
   const [bedsLoading, setBedsLoading] = useState(true);
+  const [confirmVisible, setConfirmVisible] = useState(false);
+  const [flushSyncing, setFlushSyncing] = useState(false);
+  const [offlineGateVisible, setOfflineGateVisible] = useState(false);
+  const [cleanupProgress, setCleanupProgress] = useState(false);
+  // null → hidden; { success, failedItems, timestamp } → success or error view
+  const [cleanupResult, setCleanupResult] = useState(null);
 
   // Recording state lives in context so RecordingIndicator in App.js stays in sync
   const { isRecording, setIsRecording, setConnectionStatus } = useRecordingContext();
@@ -76,12 +99,21 @@ function DashboardScreen({ navigation }) {
       setConnectionStatus,
       setBeds,
       setBedsLoading,
+      setConfirmVisible,
+      setFlushSyncing,
+      setOfflineGateVisible,
+      setCleanupProgress,
+      setCleanupResult,
     };
     const presenter = new DashboardPresenter(view);
     presenterRef.current = presenter;
     presenter.mount();
     return () => presenter.unmount();
   }, []);
+
+  function handleEndShift() {
+    presenterRef.current?.onEndShift(navigation);
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -99,7 +131,15 @@ function DashboardScreen({ navigation }) {
           <SvgXml xml={briefcaseSvg} width={48} height={44} />
           <Text style={styles.headerTitle}>Talk with Sofia</Text>
         </View>
-        <View style={styles.headerSpacer} />
+        <TouchableOpacity
+          style={styles.endShiftButton}
+          onPress={handleEndShift}
+          accessibilityLabel="End shift"
+          accessibilityHint="Ends your shift and permanently deletes all session data"
+        >
+          <SvgXml xml={endShiftSvg} width={24} height={24} />
+          <Text style={styles.endShiftLabel}>End shift</Text>
+        </TouchableOpacity>
       </View>
 
       {/* US20 — permission banner */}
@@ -147,6 +187,187 @@ function DashboardScreen({ navigation }) {
           />
         )}
       </View>
+
+      {/* End Shift — confirmation dialog */}
+      <Modal
+        visible={confirmVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => presenterRef.current?.onEndShiftCancel()}
+        accessibilityViewIsModal
+      >
+        <Pressable
+          style={styles.dialogBackdrop}
+          onPress={() => presenterRef.current?.onEndShiftCancel()}
+        >
+          <Pressable style={styles.dialogCard} onPress={() => {}}>
+            <Text style={styles.dialogTitle}>End your shift?</Text>
+            <Text style={styles.dialogBody}>
+              All captured patient data will be permanently deleted from this device.
+            </Text>
+            <View style={styles.dialogActions}>
+              <TouchableOpacity
+                style={[styles.dialogBtn, styles.dialogBtnCancel]}
+                onPress={() => presenterRef.current?.onEndShiftCancel()}
+                accessibilityLabel="Cancel"
+              >
+                <Text style={styles.dialogBtnCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.dialogBtn, styles.dialogBtnConfirm]}
+                onPress={() => presenterRef.current?.onEndShiftConfirmed(navigation)}
+                accessibilityLabel="End shift"
+              >
+                <Text style={styles.dialogBtnConfirmText}>End shift</Text>
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* End Shift — syncing overlay (attempting queue flush) */}
+      <Modal
+        visible={flushSyncing}
+        transparent
+        animationType="fade"
+        accessibilityViewIsModal
+      >
+        <View style={styles.dialogBackdrop}>
+          <View style={styles.dialogCard}>
+            <ActivityIndicator size="large" color="#1D9E75" style={styles.syncSpinner} />
+            <Text style={styles.dialogTitle}>Syncing pending data…</Text>
+            <Text style={styles.dialogBody}>
+              Uploading any unsynced recordings before clearing session data.
+            </Text>
+          </View>
+        </View>
+      </Modal>
+
+      {/* End Shift — offline gate (sync failed, nurse chooses what to do) */}
+      <Modal
+        visible={offlineGateVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => presenterRef.current?.onOfflineGateWait()}
+        accessibilityViewIsModal
+      >
+        <View style={styles.dialogBackdrop}>
+          <View style={styles.dialogCard}>
+            <Text style={styles.dialogTitle}>Unable to sync</Text>
+            <Text style={styles.dialogBody}>
+              This device is offline. Some recorded data has not been uploaded yet.{'\n\n'}
+              You can wait until connectivity is restored, or delete all local data now.
+            </Text>
+            <View style={styles.dialogActions}>
+              <TouchableOpacity
+                style={[styles.dialogBtn, styles.dialogBtnCancel]}
+                onPress={() => presenterRef.current?.onOfflineGateWait()}
+                accessibilityLabel="Wait for connectivity"
+              >
+                <Text style={styles.dialogBtnCancelText}>Wait</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.dialogBtn, styles.dialogBtnConfirm]}
+                onPress={() => presenterRef.current?.onOfflineGateForceDelete(navigation)}
+                accessibilityLabel="Delete anyway"
+              >
+                <Text style={styles.dialogBtnConfirmText}>Delete anyway</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* End Shift — cleanup progress overlay */}
+      <Modal
+        visible={cleanupProgress}
+        transparent
+        animationType="fade"
+        accessibilityViewIsModal
+      >
+        <View style={styles.dialogBackdrop}>
+          <View style={styles.dialogCard}>
+            <ActivityIndicator size="large" color="#1D9E75" style={styles.syncSpinner} />
+            <Text style={styles.dialogTitle}>Clearing session data…</Text>
+            <Text style={styles.dialogBody}>
+              Removing all patient records, recordings and transcriptions from this device.
+            </Text>
+          </View>
+        </View>
+      </Modal>
+
+      {/* End Shift — success screen */}
+      <Modal
+        visible={cleanupResult?.success === true}
+        transparent
+        animationType="fade"
+        accessibilityViewIsModal
+      >
+        <View style={styles.dialogBackdrop}>
+          <View style={[styles.dialogCard, styles.resultCard]}>
+            <SvgXml xml={checkCircleSvg} width={56} height={56} style={styles.resultIcon} />
+            <Text style={styles.dialogTitle}>Shift ended</Text>
+            <Text style={styles.dialogBody}>All data cleared.</Text>
+            {cleanupResult?.timestamp ? (
+              <Text style={styles.resultTimestamp}>
+                {new Date(cleanupResult.timestamp).toLocaleTimeString([], {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  second: '2-digit',
+                })}
+              </Text>
+            ) : null}
+            <TouchableOpacity
+              style={[styles.dialogBtn, styles.dialogBtnConfirm, styles.resultDoneBtn]}
+              onPress={() => presenterRef.current?.onSuccessDismiss(navigation)}
+              accessibilityLabel="Done"
+            >
+              <Text style={styles.dialogBtnConfirmText}>Done</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* End Shift — error screen */}
+      <Modal
+        visible={cleanupResult !== null && cleanupResult.success === false}
+        transparent
+        animationType="fade"
+        accessibilityViewIsModal
+      >
+        <View style={styles.dialogBackdrop}>
+          <View style={[styles.dialogCard, styles.resultCard]}>
+            <SvgXml xml={warningTriangleSvg} width={56} height={56} style={styles.resultIcon} />
+            <Text style={styles.dialogTitle}>Cleanup incomplete</Text>
+            <Text style={styles.dialogBody}>
+              The following items could not be deleted. Tap Retry to try again.
+            </Text>
+            <View style={styles.failedList}>
+              {(cleanupResult?.failedItems ?? []).map((item, i) => (
+                <View key={i} style={styles.failedRow}>
+                  <Text style={styles.failedRowText} numberOfLines={2}>{item}</Text>
+                </View>
+              ))}
+            </View>
+            <View style={styles.dialogActions}>
+              <TouchableOpacity
+                style={[styles.dialogBtn, styles.dialogBtnCancel]}
+                onPress={() => presenterRef.current?.onCleanupErrorDismiss()}
+                accessibilityLabel="Cancel"
+              >
+                <Text style={styles.dialogBtnCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.dialogBtn, styles.dialogBtnConfirm]}
+                onPress={() => presenterRef.current?.onRetryCleanup(navigation)}
+                accessibilityLabel="Retry cleanup"
+              >
+                <Text style={styles.dialogBtnConfirmText}>Retry</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* Bottom action bar — US7 */}
       <View style={styles.bottomBar}>
@@ -202,8 +423,17 @@ const styles = StyleSheet.create({
     borderBottomColor: '#B2B2B2',
     paddingBottom: 2,
   },
-  headerSpacer: {
-    width: 48,
+  endShiftButton: {
+    width: 64,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 4,
+  },
+  endShiftLabel: {
+    fontSize: 10,
+    color: '#A32D2D',
+    marginTop: 2,
+    fontWeight: '500',
   },
   // ─── Audio source ────────────────────────────────────────
   sourceRow: {
@@ -281,6 +511,105 @@ const styles = StyleSheet.create({
   barLabel: { fontSize: 10, color: '#5F5E5A' },
   barLabelDisabled: { color: '#B4B2A9' },
   speakerPlaceholder: { width: 24, height: 24, borderRadius: 4, backgroundColor: '#B4B2A9' },
+  // ─── End Shift dialog ────────────────────────────────────
+  dialogBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dialogCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    paddingHorizontal: 24,
+    paddingTop: 28,
+    paddingBottom: 20,
+    width: '82%',
+    maxWidth: 360,
+    elevation: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+  },
+  syncSpinner: {
+    marginBottom: 16,
+  },
+  dialogTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#1D1B20',
+    marginBottom: 10,
+  },
+  dialogBody: {
+    fontSize: 14,
+    color: '#5F5E5A',
+    lineHeight: 20,
+    marginBottom: 24,
+  },
+  dialogActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 12,
+  },
+  dialogBtn: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+    minWidth: 80,
+    alignItems: 'center',
+  },
+  dialogBtnCancel: {
+    borderWidth: 1,
+    borderColor: '#CAC4D0',
+  },
+  dialogBtnCancelText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#1D1B20',
+  },
+  dialogBtnConfirm: {
+    backgroundColor: '#A32D2D',
+  },
+  dialogBtnConfirmText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  // ─── Cleanup result (success / error) ────────────────────
+  resultCard: {
+    alignItems: 'center',
+  },
+  resultIcon: {
+    marginBottom: 16,
+  },
+  resultTimestamp: {
+    fontSize: 13,
+    color: '#767676',
+    marginTop: -8,
+    marginBottom: 24,
+  },
+  resultDoneBtn: {
+    alignSelf: 'stretch',
+    marginTop: 8,
+    backgroundColor: '#1D9E75',
+  },
+  failedList: {
+    alignSelf: 'stretch',
+    marginBottom: 20,
+    gap: 8,
+  },
+  failedRow: {
+    backgroundColor: '#FEF3EE',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  failedRowText: {
+    fontSize: 13,
+    color: '#C45C2E',
+    lineHeight: 18,
+  },
 });
 
 export default DashboardScreen;

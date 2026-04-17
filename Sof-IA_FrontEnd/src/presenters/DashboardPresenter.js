@@ -335,7 +335,7 @@ export default class DashboardPresenter {
         return success;
     }
 
-    async _proceedWithCleanup(navigation) {
+    async _proceedWithCleanup(_navigation) {
         this._pendingNavigation = null;
 
         // Stop any active recording before wiping the session

@@ -312,7 +312,7 @@ export class DexieAdapter implements IRepository {
    * Execute raw query (for advanced use cases)
    * Limited support in IndexedDB/Dexie compared to SQL
    */
-  async executeRaw(query: string, params: any[] = []): Promise<any[]> {
+  async executeRaw(_query: string, _params: any[] = []): Promise<any[]> {
     await this.ensureInitialized();
 
     // IndexedDB doesn't support raw SQL queries

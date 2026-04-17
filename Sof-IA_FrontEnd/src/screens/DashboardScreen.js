@@ -12,12 +12,12 @@ import {
   FlatList,
   Modal,
   Pressable,
-  SafeAreaView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { SvgXml } from 'react-native-svg';
 import DashboardPresenter from '../presenters/DashboardPresenter';
 import { AudioSourceBadge, MicInputIcon } from './AudioSourceBadge';

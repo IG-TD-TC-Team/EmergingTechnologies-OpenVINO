@@ -121,7 +121,7 @@ export class DexieAdapter implements IRepository {
   /**
    * Create a new record in the specified store
    */
-  async create<T>(store: string, data: T): Promise<T> {
+  async create<T>(store: string, data: Partial<T>): Promise<T> {
     await this.ensureInitialized();
 
     const now = new Date().toISOString();
@@ -188,6 +188,15 @@ export class DexieAdapter implements IRepository {
   /**
    * Query all records associated with a specific session
    */
+  async findByField<T>(store: string, field: string, value: any): Promise<T[]> {
+    await this.ensureInitialized();
+
+    const table = this.getTable(store);
+    const results = await table.where(field).equals(value).toArray();
+
+    return results as T[];
+  }
+
   async queryBySession<T>(store: string, sessionId: string): Promise<T[]> {
     await this.ensureInitialized();
 

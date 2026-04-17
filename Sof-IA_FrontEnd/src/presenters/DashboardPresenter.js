@@ -32,7 +32,7 @@ export default class DashboardPresenter {
 
     // ─── Lifecycle ────────────────────────────────────────────────────────────
 
-    async mount() {
+    async mount(isResumed = false) {
         await this._resolveAudioSource();
         await this._checkPermission();
         await this._loadBeds();
@@ -48,6 +48,10 @@ export default class DashboardPresenter {
             ServiceWorkerManager.register().catch(() => {});
         }
 
+        if (isResumed) {
+            await this._resumeSession();
+        }
+
         // Poll every 3s — detects plug/unplug and resets override if USB gone
         this._interval = setInterval(() => this._resolveAudioSource(), 3000);
 
@@ -57,6 +61,29 @@ export default class DashboardPresenter {
                 this._checkPermission();
             }
         });
+    }
+
+    async _resumeSession() {
+        this._view.setResumeBannerVisible(true);
+
+        const sessionId = await SessionService.getActiveSessionId();
+        if (!sessionId) return;
+
+        const wasRecording = await SessionService.getRecordingActive(sessionId);
+        if (!wasRecording) return;
+
+        if (WebRecorderService.isSupported()) {
+            try {
+                await WebRecorderService.start(sessionId);
+            } catch (err) {
+                console.error('[DashboardPresenter] Failed to resume recording:', err);
+                // Clear persisted flag so we don't retry on every subsequent launch
+                SessionService.setRecordingActive(sessionId, false).catch(() => {});
+                return;
+            }
+        }
+        this._isRecording = true;
+        this._view.setRecording(true);
     }
 
     unmount() {
@@ -123,8 +150,9 @@ export default class DashboardPresenter {
             this._view.setRecording(true);
         }
 
+        const sessionId = await SessionService.getActiveSessionId();
+        if (sessionId) SessionService.setRecordingActive(sessionId, this._isRecording).catch(() => {});
 
-        // US21: no bed selected → auto-create one and make it active
         if (!this._activePatient) {
             const patient = await this._autoCreatePatient();
             if (patient) {
@@ -230,20 +258,18 @@ export default class DashboardPresenter {
         await storage.create('patients', { ...basePatient, name: 'Bob', bed: '2' });
     }
 
-    // US21 — tap a bed card to set it as the active patient context
     onBedPress(patient) {
         this._activePatient = { id: patient.id, name: patient.name, bed: patient.bed };
         this._view.setActivePatient(this._activePatient);
     }
 
-    // US21 — X button on the active patient chip resets context to none
     onClearActivePatient() {
         this._activePatient = null;
         this._view.setActivePatient(null);
     }
 
     /**
-     * US21 — Returns hint fields to include in the transcription API request.
+     * Returns hint fields to include in the transcription API request.
      * The API uses these as soft hints to improve structuration confidence;
      * they are not binding — the API can still detect other patients from speech.
      *
@@ -255,6 +281,12 @@ export default class DashboardPresenter {
             hint_patient_name: this._activePatient.name,
             hint_room: this._activePatient.bed,
         };
+    }
+
+    // ─── Resume banner ───────────────────────────────────────────────────────
+
+    onDismissResumeBanner() {
+        this._view.setResumeBannerVisible(false);
     }
 
     // ─── End Shift ────────────────────────────────────────────────────────────
@@ -306,7 +338,16 @@ export default class DashboardPresenter {
     async _proceedWithCleanup(navigation) {
         this._pendingNavigation = null;
 
+        // Stop any active recording before wiping the session
+        if (this._isRecording) {
+            if (WebRecorderService.isSupported()) WebRecorderService.stop();
+            this._isRecording = false;
+            this._view.setRecording(false);
+        }
+
         const sessionId = await SessionService.getActiveSessionId();
+
+        if (sessionId) SessionService.setRecordingActive(sessionId, false).catch(() => {});
 
         this._view.setCleanupProgress(true);
         const result = await EndShiftService.run(sessionId ?? '');

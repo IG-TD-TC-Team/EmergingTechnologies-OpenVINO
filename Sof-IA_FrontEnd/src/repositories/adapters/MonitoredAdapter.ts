@@ -160,8 +160,14 @@ export class MonitoredAdapter implements IRepository {
   // IRepository interface implementation
   // ========================================
 
-  async create<T>(store: string, data: T): Promise<T> {
+  async create<T>(store: string, data: Partial<T>): Promise<T> {
     return this.executeWithMonitoring(`create:${store}`, () => this.adapter.create(store, data));
+  }
+
+  async findByField<T>(store: string, field: string, value: any): Promise<T[]> {
+    return this.executeWithMonitoring(`findByField:${store}`, () =>
+      this.adapter.findByField(store, field, value)
+    );
   }
 
   async read<T>(store: string, id: string): Promise<T | null> {

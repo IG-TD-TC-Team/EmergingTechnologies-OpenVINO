@@ -17,7 +17,7 @@ class LoadingPresenter {
 
       if (hasShift) {
         // US #23 — resume active shift, skip Mode Selection
-        navigation.replace('Dashboard');
+        navigation.replace('Dashboard', { resumed: true });
       } else {
         navigation.replace('ModeSelection');
       }

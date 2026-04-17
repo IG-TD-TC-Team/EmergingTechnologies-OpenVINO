@@ -68,6 +68,11 @@ const bedActiveSvg = `<svg width="43" height="43" viewBox="0 0 48 48" fill="none
 const closeSvg = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
   <path d="M19 6.41L17.59 5L12 10.59L6.41 5L5 6.41L10.59 12L5 17.59L6.41 19L12 13.41L17.59 19L19 17.59L13.41 12L19 6.41Z" fill="#1D9E75"/>
 </svg>`;
+
+// Resume banner check icon
+const resumeCheckSvg = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M9 12L11 14L15 10M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C16.9706 3 21 7.02944 21 12Z" stroke="#1D9E75" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>`;
 // --- Bed Card Component ---
 
 function BedCard({ bed, name, onPress, isActive }) {
@@ -145,9 +150,52 @@ function PulsingMicButton({ isRecording, disabled, onPress }) {
     );
 }
 
+// --- Resume banner ---
+
+function ResumeBanner({ visible, onDismiss }) {
+    const translateY = useRef(new Animated.Value(-48)).current;
+    // Ref keeps the latest onDismiss without adding it to effect deps
+    const onDismissRef = useRef(onDismiss);
+    onDismissRef.current = onDismiss;
+
+    useEffect(() => {
+        if (!visible) {
+            // Reset position so the next appearance animates from the top again
+            translateY.setValue(-48);
+            return;
+        }
+
+        Animated.spring(translateY, {
+            toValue: 0,
+            useNativeDriver: true,
+            tension: 80,
+            friction: 10,
+        }).start();
+
+        const timer = setTimeout(() => {
+            Animated.timing(translateY, {
+                toValue: -48,
+                duration: 300,
+                useNativeDriver: true,
+            }).start(() => onDismissRef.current());
+        }, 3000);
+
+        return () => clearTimeout(timer);
+    }, [visible]);
+
+    if (!visible) return null;
+
+    return (
+        <Animated.View style={[styles.resumeBanner, { transform: [{ translateY }] }]}>
+            <SvgXml xml={resumeCheckSvg} width={16} height={16} />
+            <Text style={styles.resumeBannerText}>Shift resumed — welcome back</Text>
+        </Animated.View>
+    );
+}
+
 // --- Screen ---
 
-function DashboardScreen({ navigation }) {
+function DashboardScreen({ navigation, route }) {
   const [audioSource, setAudioSource] = useState({
     sourceKey: 'builtin',
     sourceLabel: 'Built-in mic',
@@ -166,8 +214,11 @@ function DashboardScreen({ navigation }) {
     const [activePatient, setActivePatient] = useState(null);
 // true on native (always capable) and on Chrome; false on Firefox/Safari/Edge
     const [browserSupported, setBrowserSupported] = useState(true);
+    const [resumeBannerVisible, setResumeBannerVisible] = useState(false);
 
   const presenterRef = useRef(null);
+
+  const isResumed = route?.params?.resumed ?? false;
 
   useEffect(() => {
     const view = {
@@ -183,10 +234,11 @@ function DashboardScreen({ navigation }) {
       setCleanupResult,
         setActivePatient,
         setBrowserSupported,
+        setResumeBannerVisible,
     };
     const presenter = new DashboardPresenter(view);
     presenterRef.current = presenter;
-    presenter.mount();
+    presenter.mount(isResumed);
     return () => presenter.unmount();
   }, []);
 
@@ -221,6 +273,11 @@ function DashboardScreen({ navigation }) {
         </TouchableOpacity>
       </View>
 
+
+        <ResumeBanner
+            visible={resumeBannerVisible}
+            onDismiss={() => presenterRef.current?.onDismissResumeBanner()}
+        />
 
         {/* Chrome-only guard — shown on Firefox, Safari, Edge, etc. */}
         {!browserSupported && (
@@ -279,7 +336,6 @@ function DashboardScreen({ navigation }) {
       </View>
 
 
-        {/* US21 — active patient chip (shown above the bottom bar when a bed is selected) */}
         {activePatient && (
             <View style={styles.activePatientRow}>
                 <View style={styles.activePatientChip}>
@@ -548,6 +604,26 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
 
+    // ─── Resume banner ───────────────────────────────────────
+    resumeBanner: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        backgroundColor: '#E8F7F2',
+        borderWidth: 0.5,
+        borderColor: '#1D9E75',
+        borderRadius: 8,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        marginHorizontal: 16,
+        marginTop: 8,
+    },
+    resumeBannerText: {
+        fontSize: 13,
+        color: '#1D9E75',
+        fontWeight: '500',
+    },
+
     // ─── Unsupported browser banner ─────────────────────────
     unsupportedBanner: {
         flexDirection: 'row',
@@ -614,7 +690,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     width: '30%',
   },
-    // US21 — active bed highlight
     bedCardActive: {
         opacity: 1,
     },
@@ -639,7 +714,7 @@ const styles = StyleSheet.create({
     bedChipTextActive: {
         color: '#1D9E75',
     },
-    // ─── US21 active patient chip ────────────────────────────
+    // ─── Active patient chip ─────────────────────────────────
     activePatientRow: {
         alignItems: 'center',
         paddingVertical: 8,

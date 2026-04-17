@@ -268,6 +268,43 @@ class SessionService {
   }
 
   /**
+   * Persist whether recording was active for the given session.
+   * Stored in AsyncStorage so the state survives an app close/reopen.
+   *
+   * @param sessionId  The session the recording belongs to.
+   * @param active     true = recording running, false = stopped.
+   */
+  async setRecordingActive(sessionId: string, active: boolean): Promise<void> {
+    try {
+      const key = StorageKeys.RECORDING_ACTIVE_PREFIX + sessionId;
+      if (active) {
+        await AsyncStorage.setItem(key, 'true');
+      } else {
+        await AsyncStorage.removeItem(key);
+      }
+    } catch (error) {
+      console.error('[SessionService] Failed to persist recording state:', error);
+    }
+  }
+
+  /**
+   * Read back whether recording was active for the given session.
+   *
+   * @param sessionId  The session to query.
+   * @returns true if recording was active when the app last closed.
+   */
+  async getRecordingActive(sessionId: string): Promise<boolean> {
+    try {
+      const key = StorageKeys.RECORDING_ACTIVE_PREFIX + sessionId;
+      const value = await AsyncStorage.getItem(key);
+      return value === 'true';
+    } catch (error) {
+      console.error('[SessionService] Failed to read recording state:', error);
+      return false;
+    }
+  }
+
+  /**
    * Clear the active session cache.
    * Useful when you know the session state has changed externally.
    */

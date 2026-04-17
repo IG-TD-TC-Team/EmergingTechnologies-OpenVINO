@@ -31,7 +31,7 @@ export class RepositoryFactory {
     }
 
     const adapter = await this.createAdapter();
-    await adapter.initialize();
+    await (adapter as any).initialize();
 
     this.instance = adapter;
     return adapter;

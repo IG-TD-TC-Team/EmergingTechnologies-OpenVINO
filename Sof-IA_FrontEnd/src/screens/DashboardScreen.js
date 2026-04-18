@@ -22,6 +22,7 @@ import { SvgXml } from 'react-native-svg';
 import DashboardPresenter from '../presenters/DashboardPresenter';
 import { AudioSourceBadge, MicInputIcon } from './AudioSourceBadge';
 import { MicPermissionBanner } from './MicPermissionBanner';
+import { useRecordingContext } from '../contexts/RecordingContext';
 
 // --- SVG icons ---
 
@@ -137,7 +138,6 @@ function DashboardScreen({ navigation }) {
     canToggle: false,
   });
   const [micStatus, setMicStatus] = useState('undetermined');
-  const [isRecording, setRecording] = useState(false);
   const [beds, setBeds] = useState([]);
   const [bedsLoading, setBedsLoading] = useState(true);
   const [confirmVisible, setConfirmVisible] = useState(false);
@@ -149,13 +149,17 @@ function DashboardScreen({ navigation }) {
   // true on native (always capable) and on Chrome; false on Firefox/Safari/Edge
   const [browserSupported, setBrowserSupported] = useState(true);
 
+  // Recording state lives in context so RecordingIndicator in App.js stays in sync
+  const { isRecording, setIsRecording, setConnectionStatus } = useRecordingContext();
+
   const presenterRef = useRef(null);
 
   useEffect(() => {
     const view = {
       setAudioSource,
       setMicStatus,
-      setRecording,
+      setRecording: setIsRecording,
+      setConnectionStatus,
       setBeds,
       setBedsLoading,
       setConfirmVisible,

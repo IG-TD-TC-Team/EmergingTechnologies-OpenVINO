@@ -6,20 +6,52 @@
  *
  * Props:
  *   status              'undetermined' | 'granted' | 'denied' | 'blocked'
- *   onRequestPermission called when nurse taps "Enable mic" (denied state)
- *   onOpenSettings      called when nurse taps "Open Settings" (blocked state)
+ *   onRequestPermission called when nurse taps "Enable mic"
+ *   onOpenSettings      called when nurse taps "Open Settings" (Android blocked only)
  *
- * Hidden when status is 'granted' or 'undetermined'.
+ * Android: hidden for 'undetermined' (OS dialog fires on first recording tap)
+ * Chrome:  shows explanation prompt for 'undetermined' (first-use, before browser dialog)
+ *          shows inline instructions for 'blocked' (Chrome settings can't be opened programmatically)
  */
 
 import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { capabilities } from '../config/capabilities';
 
 export function MicPermissionBanner({ status, onRequestPermission, onOpenSettings }) {
-    if (status === 'granted' || status === 'undetermined') return null;
+    const isWeb = capabilities.isWeb;
 
+    if (status === 'granted') return null;
+    // Android: hide when undetermined — OS dialog fires on first mic tap
+    if (!isWeb && status === 'undetermined') return null;
+
+    // Chrome: first-use explanation shown before the browser permission prompt fires
+    if (isWeb && status === 'undetermined') {
+        return (
+            <View style={[styles.banner, styles.bannerInfo]}>
+                <Text style={[styles.message, styles.messageInfo]}>
+                    Microphone access is needed for ambient recording. Tap below to allow Chrome to record audio.
+                </Text>
+                <TouchableOpacity style={[styles.button, styles.buttonInfo]} onPress={onRequestPermission}>
+                    <Text style={[styles.buttonText, styles.buttonTextInfo]}>Enable mic</Text>
+                </TouchableOpacity>
+            </View>
+        );
+    }
+
+    // Chrome: blocked — inline instructions since chrome://settings can't be opened from JS
+    if (isWeb && (status === 'blocked' || status === 'denied')) {
+        return (
+            <View style={styles.banner}>
+                <Text style={styles.message}>
+                    Microphone blocked. To re-enable: click the lock icon in Chrome's address bar → Site settings → Microphone → Allow.
+                </Text>
+            </View>
+        );
+    }
+
+    // Android: denied or blocked
     const isBlocked = status === 'blocked';
-
     return (
         <View style={styles.banner}>
             <Text style={styles.message}>
@@ -51,11 +83,18 @@ const styles = StyleSheet.create({
         marginTop: 8,
         gap: 10,
     },
+    bannerInfo: {
+        backgroundColor: '#EEF4FF',
+        borderColor: '#93B4F0',
+    },
     message: {
         flex: 1,
         fontSize: 13,
         color: '#791F1F',
         lineHeight: 18,
+    },
+    messageInfo: {
+        color: '#1A3A6B',
     },
     button: {
         backgroundColor: '#fff',
@@ -66,9 +105,15 @@ const styles = StyleSheet.create({
         paddingVertical: 6,
         flexShrink: 0,
     },
+    buttonInfo: {
+        borderColor: '#4A7FD4',
+    },
     buttonText: {
         fontSize: 12,
         fontWeight: '500',
         color: '#A32D2D',
+    },
+    buttonTextInfo: {
+        color: '#1A3A6B',
     },
 });

@@ -12,8 +12,10 @@
  *   setBedsLoading(bool)  — loading state for bed grid
  */
 
-import { AppState } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import AudioSourceResolver from '../services/audio/AudioSourceResolver';
+import WebRecorderService from '../services/audio/WebRecorderService';
+import ServiceWorkerManager from '../services/audio/ServiceWorkerManager';
 import PermissionsService from '../services/PermissionsService';
 import SessionService from '../services/SessionService';
 
@@ -52,6 +54,17 @@ export default class DashboardPresenter {
 
         // Sync initial recording state to view
         this._view.setRecording(ContinuousRecordingService.isRecording());
+
+        // On web, tell the view whether this browser supports recording.
+        // False for anything other than Chrome (no MediaRecorder / codec support).
+        if (Platform.OS === 'web') {
+            this._view.setBrowserSupported(WebRecorderService.isSupported());
+        }
+
+        // Register the Service Worker on web for background audio chunk uploads.
+        if (WebRecorderService.isSupported()) {
+            ServiceWorkerManager.register().catch(() => {});
+        }
 
         // Poll every 3s — detects plug/unplug and resets override if USB gone
         this._interval = setInterval(() => this._resolveAudioSource(), 3000);
@@ -111,13 +124,32 @@ export default class DashboardPresenter {
         this._view.setMicStatus(status);
         if (status !== 'granted') return;
 
-        const sessionId = await SessionService.getActiveSessionId();
-        if (!sessionId) {
-            console.warn('[DashboardPresenter] No active session — cannot toggle recording');
-            return;
+        if (Platform.OS === 'web') {
+            if (this._isRecording) {
+                if (WebRecorderService.isSupported()) WebRecorderService.stop();
+                this._isRecording = false;
+                this._view.setRecording(false);
+            } else {
+                if (WebRecorderService.isSupported()) {
+                    try {
+                        const sessionId = await SessionService.getActiveSessionId();
+                        await WebRecorderService.start(sessionId ?? '');
+                    } catch (err) {
+                        console.error('[DashboardPresenter] Failed to start web recording:', err);
+                        return;
+                    }
+                }
+                this._isRecording = true;
+                this._view.setRecording(true);
+            }
+        } else {
+            const sessionId = await SessionService.getActiveSessionId();
+            if (!sessionId) {
+                console.warn('[DashboardPresenter] No active session — cannot toggle recording');
+                return;
+            }
+            await ContinuousRecordingService.toggleRecording(sessionId);
         }
-
-        await ContinuousRecordingService.toggleRecording(sessionId);
     }
 
     async onRequestPermission() {

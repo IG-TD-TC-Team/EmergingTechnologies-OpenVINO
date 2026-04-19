@@ -11,6 +11,7 @@
  *   setBedsLoading(bool)  — loading state for bed grid
  */
 
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppState, Platform } from 'react-native';
 import AudioSourceResolver from '../services/audio/AudioSourceResolver';
 import WebRecorderService from '../services/audio/WebRecorderService';
@@ -19,6 +20,7 @@ import PermissionsService from '../services/PermissionsService';
 import SessionService from '../services/SessionService';
 import EndShiftService from '../services/EndShiftService';
 import { getStorage } from '../repositories';
+import StorageKeys from '../constants/storageKeys';
 
 export default class DashboardPresenter {
     constructor(view) {
@@ -48,6 +50,9 @@ export default class DashboardPresenter {
             ServiceWorkerManager.register().catch(() => {});
         }
 
+        // US23 — auto-resume recording if it was active before app closed
+        await this._maybeResumeRecording();
+
         // Poll every 3s — detects plug/unplug and resets override if USB gone
         this._interval = setInterval(() => this._resolveAudioSource(), 3000);
 
@@ -57,6 +62,36 @@ export default class DashboardPresenter {
                 this._checkPermission();
             }
         });
+    }
+
+    async _maybeResumeRecording() {
+        try {
+            const flag = await AsyncStorage.getItem(StorageKeys.WAS_RECORDING);
+            if (flag !== 'true') return;
+            const status = await PermissionsService.check();
+            if (status !== 'granted') return;
+            await this._startRecording();
+        } catch (e) {
+            console.error('[DashboardPresenter] Failed to auto-resume recording:', e);
+        }
+    }
+
+    async _startRecording() {
+        if (WebRecorderService.isSupported()) {
+            const sessionId = await SessionService.getActiveSessionId();
+            await WebRecorderService.start(sessionId ?? '');
+        }
+        this._isRecording = true;
+        this._view.setRecording(true);
+        await this._persistRecordingState(true);
+    }
+
+    async _persistRecordingState(isRecording) {
+        try {
+            await AsyncStorage.setItem(StorageKeys.WAS_RECORDING, String(isRecording));
+        } catch (e) {
+            console.error('[DashboardPresenter] Failed to persist recording state:', e);
+        }
     }
 
     unmount() {
@@ -109,18 +144,14 @@ export default class DashboardPresenter {
             if (WebRecorderService.isSupported()) WebRecorderService.stop();
             this._isRecording = false;
             this._view.setRecording(false);
+            await this._persistRecordingState(false);
         } else {
-            if (WebRecorderService.isSupported()) {
-                try {
-                    const sessionId = await SessionService.getActiveSessionId();
-                    await WebRecorderService.start(sessionId ?? '');
-                } catch (err) {
-                    console.error('[DashboardPresenter] Failed to start web recording:', err);
-                    return;
-                }
+            try {
+                await this._startRecording();
+            } catch (err) {
+                console.error('[DashboardPresenter] Failed to start web recording:', err);
+                return;
             }
-            this._isRecording = true;
-            this._view.setRecording(true);
         }
 
 
@@ -327,6 +358,7 @@ export default class DashboardPresenter {
             this._isRecording = false;
             this._view.setRecording(false);
         }
+        this._persistRecordingState(false);
 // Clear active patient — shift is over
         if (this._activePatient) {
             this._activePatient = null;

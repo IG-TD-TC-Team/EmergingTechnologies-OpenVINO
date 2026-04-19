@@ -15,6 +15,7 @@ const StorageKeys = {
   DEVICE_ID: 'device_id',         // Persistent device identifier for audit trail
   AUDIO_DEVICE: 'audio_device',   // User preference - audio device selection
   // ACTIVE_SHIFT removed - now stored in sessions table via IRepository
+  WAS_RECORDING: 'was_recording', // US23 — auto-resume recording after app relaunch
 };
 
 export default StorageKeys;

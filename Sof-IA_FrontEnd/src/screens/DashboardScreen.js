@@ -147,7 +147,7 @@ function PulsingMicButton({ isRecording, disabled, onPress }) {
 
 // --- Screen ---
 
-function DashboardScreen({ navigation }) {
+function DashboardScreen({ navigation, route }) {
   const [audioSource, setAudioSource] = useState({
     sourceKey: 'builtin',
     sourceLabel: 'Built-in mic',
@@ -166,6 +166,14 @@ function DashboardScreen({ navigation }) {
     const [activePatient, setActivePatient] = useState(null);
 // true on native (always capable) and on Chrome; false on Firefox/Safari/Edge
     const [browserSupported, setBrowserSupported] = useState(true);
+  // US23 — show a brief "shift resumed" banner when app relaunched into an active session
+  const [resumedBanner, setResumedBanner] = useState(!!route?.params?.resumed);
+
+  useEffect(() => {
+    if (!resumedBanner) return;
+    const t = setTimeout(() => setResumedBanner(false), 3500);
+    return () => clearTimeout(t);
+  }, []);
 
   const presenterRef = useRef(null);
 
@@ -230,6 +238,13 @@ function DashboardScreen({ navigation }) {
                 </Text>
             </View>
         )}
+
+      {/* US23 — shift resume indicator */}
+      {resumedBanner && (
+        <View style={styles.resumedBanner}>
+          <Text style={styles.resumedBannerText}>Shift resumed — recording will continue automatically.</Text>
+        </View>
+      )}
 
       {/* US20 — permission banner */}
       <MicPermissionBanner
@@ -547,6 +562,26 @@ const styles = StyleSheet.create({
     marginTop: 2,
     fontWeight: '500',
   },
+
+    // ─── US23 shift-resumed banner ──────────────────────────
+    resumedBanner: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#E8F7F2',
+        borderWidth: 0.5,
+        borderColor: '#1D9E75',
+        borderRadius: 8,
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        marginHorizontal: 16,
+        marginTop: 8,
+    },
+    resumedBannerText: {
+        flex: 1,
+        fontSize: 13,
+        color: '#145C44',
+        lineHeight: 18,
+    },
 
     // ─── Unsupported browser banner ─────────────────────────
     unsupportedBanner: {

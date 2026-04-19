@@ -12,6 +12,7 @@
  *   setBedsLoading(bool)  — loading state for bed grid
  */
 
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppState, Platform } from 'react-native';
 import AudioSourceResolver from '../services/audio/AudioSourceResolver';
 import WebRecorderService from '../services/audio/WebRecorderService';
@@ -22,6 +23,7 @@ import SessionService from '../services/SessionService';
 import ContinuousRecordingService from '../services/audio/ContinuousRecordingService';
 import EndShiftService from '../services/EndShiftService';
 import { getStorage } from '../repositories';
+import StorageKeys from '../constants/storageKeys';
 
 export default class DashboardPresenter {
     constructor(view) {
@@ -33,7 +35,7 @@ export default class DashboardPresenter {
 
         this._isRecording = false;
         this._pendingNavigation = null;
-
+        this._activePatient = null;
     }
 
     // ─── Lifecycle ────────────────────────────────────────────────────────────
@@ -66,6 +68,9 @@ export default class DashboardPresenter {
             ServiceWorkerManager.register().catch(() => {});
         }
 
+        // US23 — auto-resume recording if it was active before app closed
+        await this._maybeResumeRecording();
+
         // Poll every 3s — detects plug/unplug and resets override if USB gone
         this._interval = setInterval(() => this._resolveAudioSource(), 3000);
 
@@ -75,6 +80,36 @@ export default class DashboardPresenter {
                 this._checkPermission();
             }
         });
+    }
+
+    async _maybeResumeRecording() {
+        try {
+            const flag = await AsyncStorage.getItem(StorageKeys.WAS_RECORDING);
+            if (flag !== 'true') return;
+            const status = await PermissionsService.check();
+            if (status !== 'granted') return;
+            await this._startRecording();
+        } catch (e) {
+            console.error('[DashboardPresenter] Failed to auto-resume recording:', e);
+        }
+    }
+
+    async _startRecording() {
+        if (WebRecorderService.isSupported()) {
+            const sessionId = await SessionService.getActiveSessionId();
+            await WebRecorderService.start(sessionId ?? '');
+        }
+        this._isRecording = true;
+        this._view.setRecording(true);
+        await this._persistRecordingState(true);
+    }
+
+    async _persistRecordingState(isRecording) {
+        try {
+            await AsyncStorage.setItem(StorageKeys.WAS_RECORDING, String(isRecording));
+        } catch (e) {
+            console.error('[DashboardPresenter] Failed to persist recording state:', e);
+        }
     }
 
     unmount() {
@@ -129,18 +164,14 @@ export default class DashboardPresenter {
                 if (WebRecorderService.isSupported()) WebRecorderService.stop();
                 this._isRecording = false;
                 this._view.setRecording(false);
+                await this._persistRecordingState(false);
             } else {
-                if (WebRecorderService.isSupported()) {
-                    try {
-                        const sessionId = await SessionService.getActiveSessionId();
-                        await WebRecorderService.start(sessionId ?? '');
-                    } catch (err) {
-                        console.error('[DashboardPresenter] Failed to start web recording:', err);
-                        return;
-                    }
+                try {
+                    await this._startRecording();
+                } catch (err) {
+                    console.error('[DashboardPresenter] Failed to start web recording:', err);
+                    return;
                 }
-                this._isRecording = true;
-                this._view.setRecording(true);
             }
         } else {
             const sessionId = await SessionService.getActiveSessionId();
@@ -149,6 +180,47 @@ export default class DashboardPresenter {
                 return;
             }
             await ContinuousRecordingService.toggleRecording(sessionId);
+        }
+
+        // US21: no bed selected → auto-create one and make it active
+        if (!this._activePatient) {
+            const patient = await this._autoCreatePatient();
+            if (patient) {
+                this._activePatient = { id: patient.id, name: patient.name, bed: patient.bed };
+                this._view.setActivePatient(this._activePatient);
+                await this._loadBeds();
+            }
+        }
+    }
+
+    async _autoCreatePatient() {
+        try {
+            const sessionId = await SessionService.getActiveSessionId();
+            if (!sessionId) return null;
+
+            const storage = await getStorage();
+            const existing = await storage.queryBySession('patients', sessionId);
+            const nextBed = String(existing.length + 1);
+            const now = new Date().toISOString();
+
+            return await storage.create('patients', {
+                session_id: sessionId,
+                name: '',
+                bed: nextBed,
+                mrn: null,
+                date_of_birth: null,
+                status: 'active',
+                diagnosis: null,
+                allergies: null,
+                medications: null,
+                notes: null,
+                last_interaction_at: now,
+                note_count: 0,
+                recording_count: 0,
+            });
+        } catch (e) {
+            console.error('[DashboardPresenter] Failed to auto-create patient:', e);
+            return null;
         }
     }
 
@@ -216,8 +288,31 @@ export default class DashboardPresenter {
         await storage.create('patients', { ...basePatient, name: 'Bob', bed: '2' });
     }
 
-    onBedPress(patient, navigation) {
-        navigation.navigate('BedDetails', { patient });
+    // US21 — tap a bed card to set it as the active patient context
+    onBedPress(patient) {
+        this._activePatient = { id: patient.id, name: patient.name, bed: patient.bed };
+        this._view.setActivePatient(this._activePatient);
+    }
+
+    // US21 — X button on the active patient chip resets context to none
+    onClearActivePatient() {
+        this._activePatient = null;
+        this._view.setActivePatient(null);
+    }
+
+    /**
+     * US21 — Returns hint fields to include in the transcription API request.
+     * The API uses these as soft hints to improve structuration confidence;
+     * they are not binding — the API can still detect other patients from speech.
+     *
+     * @returns {{ hint_patient_name?: string, hint_room?: string }}
+     */
+    getApiHints() {
+        if (!this._activePatient) return {};
+        return {
+            hint_patient_name: this._activePatient.name,
+            hint_room: this._activePatient.bed,
+        };
     }
 
     // ─── End Shift ────────────────────────────────────────────────────────────
@@ -289,6 +384,12 @@ export default class DashboardPresenter {
         if (this._isRecording) {
             this._isRecording = false;
             this._view.setRecording(false);
+        }
+        this._persistRecordingState(false);
+// Clear active patient — shift is over
+        if (this._activePatient) {
+            this._activePatient = null;
+            this._view.setActivePatient(null);
         }
 
         // Reset the stack to ModeSelection so the nurse cannot navigate back

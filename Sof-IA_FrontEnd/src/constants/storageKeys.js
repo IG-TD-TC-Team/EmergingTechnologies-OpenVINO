@@ -16,6 +16,7 @@ const StorageKeys = {
   AUDIO_DEVICE: 'audio_device',                   // User preference - audio device selection
   RECORDING_SESSION_STATE: 'recording_session_state', // Active recording state — restored on app relaunch
   // ACTIVE_SHIFT removed - now stored in sessions table via IRepository
+  WAS_RECORDING: 'was_recording', // US23 — auto-resume recording after app relaunch
 };
 
 export default StorageKeys;

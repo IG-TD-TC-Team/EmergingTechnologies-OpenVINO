@@ -79,6 +79,7 @@ function makeView() {
     setOfflineGateVisible: jest.fn(),
     setCleanupProgress: jest.fn(),
     setCleanupResult: jest.fn(),
+    setActivePatient: jest.fn(),
   };
 }
 

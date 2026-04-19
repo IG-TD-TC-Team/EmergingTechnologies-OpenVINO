@@ -64,10 +64,14 @@ export class DexieAdapter implements IRepository {
         'id, session_id, audio_recording_id, patient_id, status, expires_at, [session_id+status], [patient_id+status], [audio_recording_id+status]',
       clinical_notes:
         'id, session_id, patient_id, transcription_id, note_type, reviewed, expires_at, [session_id+patient_id], [patient_id+note_type], [patient_id+reviewed]',
-      // Offline upload queue: chunk_ref → AudioRecording.id
       recording_queue: 'id, session_id, status, chunk_ref',
-      // Raw audio Blob storage (Web only — keyed by UUID, referenced via indexeddb://audio-blobs/<id>)
       audio_blobs: 'id, session_id, created_at',
+    });
+
+    // Version 3: index expires_at on recording_queue and audio_blobs so purgeExpired() can use them
+    this.db.version(3).stores({
+      recording_queue: 'id, session_id, status, chunk_ref, expires_at',
+      audio_blobs: 'id, session_id, created_at, expires_at',
     });
   }
 

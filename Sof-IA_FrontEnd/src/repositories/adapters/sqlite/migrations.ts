@@ -223,6 +223,26 @@ export const migrations: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_recording_queue_status ON recording_queue(status);
     `,
   },
+  {
+    version: 3,
+    name: 'add_audio_blobs_and_expires_at_indexes',
+    up: `
+      -- Raw audio blob store (Web only — referenced via indexeddb://audio-blobs/<id>)
+      CREATE TABLE IF NOT EXISTS audio_blobs (
+        id TEXT PRIMARY KEY NOT NULL,
+        session_id TEXT NOT NULL,
+        blob BLOB,
+        mime_type TEXT NOT NULL,
+        size_bytes INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_audio_blobs_session_id ON audio_blobs(session_id);
+      CREATE INDEX IF NOT EXISTS idx_audio_blobs_expires_at ON audio_blobs(expires_at);
+      -- Back-fill missing expires_at index on recording_queue
+      CREATE INDEX IF NOT EXISTS idx_recording_queue_expires_at ON recording_queue(expires_at);
+    `,
+  },
 ];
 
 /**

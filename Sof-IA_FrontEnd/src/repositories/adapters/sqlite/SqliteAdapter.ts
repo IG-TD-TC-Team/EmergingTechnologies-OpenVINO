@@ -64,7 +64,7 @@ export class SqliteAdapter implements IRepository {
   /**
    * Create a new record in the specified store
    */
-  async create<T>(store: string, data: T): Promise<T> {
+  async create<T>(store: string, data: Partial<T>): Promise<T> {
     await this.ensureInitialized();
 
     const now = new Date().toISOString();
@@ -138,6 +138,15 @@ export class SqliteAdapter implements IRepository {
   /**
    * Query all records associated with a specific session
    */
+  async findByField<T>(store: string, field: string, value: any): Promise<T[]> {
+    await this.ensureInitialized();
+
+    const query = `SELECT * FROM ${store} WHERE ${field} = ? ORDER BY created_at DESC`;
+    const results = await this.db.getAllAsync<any>(query, [value]);
+
+    return results.map((r) => this.deserializeRecord(r)) as T[];
+  }
+
   async queryBySession<T>(store: string, sessionId: string): Promise<T[]> {
     await this.ensureInitialized();
 

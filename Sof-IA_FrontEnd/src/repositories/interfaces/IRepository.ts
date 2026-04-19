@@ -10,7 +10,6 @@
  * - Support for session-based queries and bulk operations
  * - Automatic expiration handling
  *
- * @see https://github.com/Sof-IA - Project documentation
  */
 
 /**
@@ -51,7 +50,7 @@ export interface IRepository {
    *   sessionId: "shift_123"
    * });
    */
-  create<T>(store: string, data: T): Promise<T>;
+  create<T>(store: string, data: Partial<T>): Promise<T>;
 
   /**
    * Read a single record by ID.
@@ -132,6 +131,21 @@ export interface IRepository {
    * });
    */
   bulkDelete(store: string, where: WhereClause): Promise<number>;
+
+  /**
+   * Query all records where a specific field matches a value.
+   * Used for status-based lookups (e.g. finding the active session).
+   *
+   * @template T - The entity type
+   * @param store - Store/table name
+   * @param field - Field name to filter on
+   * @param value - Value to match
+   * @returns Array of matching entities
+   *
+   * @example
+   * const active = await repo.findByField<Session>("sessions", "status", "active");
+   */
+  findByField<T>(store: string, field: string, value: any): Promise<T[]>;
 
   /**
    * Purge all expired records across all stores.

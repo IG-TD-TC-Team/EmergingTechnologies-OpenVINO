@@ -34,6 +34,7 @@ jest.mock('../../services/SessionService', () => ({
   __esModule: true,
   default: {
     getActiveSessionId: jest.fn(),
+    setRecordingActive: jest.fn(),
     clearCache: jest.fn(),
   },
 }));
@@ -114,6 +115,7 @@ describe('DashboardPresenter — US21 active patient', () => {
 
     // Re-apply implementations after clearAllMocks
     SessionService.getActiveSessionId.mockResolvedValue('session_test_123');
+    SessionService.setRecordingActive.mockResolvedValue(undefined);
     PermissionsService.ensure.mockResolvedValue('granted');
     PermissionsService.check.mockResolvedValue('granted');
 

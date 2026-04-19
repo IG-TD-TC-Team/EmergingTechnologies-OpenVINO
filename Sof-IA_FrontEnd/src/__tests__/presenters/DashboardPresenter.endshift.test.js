@@ -29,6 +29,7 @@ jest.mock('../../services/SessionService', () => ({
   __esModule: true,
   default: {
     getActiveSessionId: jest.fn(),
+    setRecordingActive: jest.fn(),
     clearCache: jest.fn(),
   },
 }));
@@ -100,6 +101,7 @@ describe('DashboardPresenter — end shift flow', () => {
     navigation = makeNavigation();
     presenter = new DashboardPresenter(view);
     SessionService.getActiveSessionId.mockResolvedValue('session_test_123');
+    SessionService.setRecordingActive.mockResolvedValue(undefined);
   });
 
   // ── Step 1: button tap ────────────────────────────────────────────────────

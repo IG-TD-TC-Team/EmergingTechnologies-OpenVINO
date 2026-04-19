@@ -118,6 +118,16 @@ export class StorageFactory {
       this.health.healthy = true;
       this.health.errorCount = 0;
 
+      // Purge expired records on every cold startup
+      try {
+        const purged = await adapter.purgeExpired();
+        if (purged > 0) {
+          this.log(LogLevel.INFO, `Purged ${purged} expired record(s) on startup`);
+        }
+      } catch (purgeError) {
+        this.log(LogLevel.WARN, 'purgeExpired on startup failed (non-fatal):', purgeError);
+      }
+
       // Start health checks if enabled
       if (this.config.enableHealthChecks) {
         this.startHealthChecks();

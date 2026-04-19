@@ -111,6 +111,11 @@ export interface IRepository {
   queryBySession<T>(store: string, sessionId: string): Promise<T[]>;
 
   /**
+   * Find all records where a given field equals a value.
+   */
+  findByField<T>(store: string, field: string, value: any): Promise<T[]>;
+
+  /**
    * Delete multiple records matching a where clause.
    * Used for bulk cleanup operations and session data purging.
    *

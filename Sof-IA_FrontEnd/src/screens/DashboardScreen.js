@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
     Animated,
   FlatList,
+  Platform,
   Modal,
   Pressable,
   SafeAreaView,
@@ -105,12 +106,12 @@ function PulsingMicButton({ isRecording, disabled, onPress }) {
             const anim = Animated.loop(
                 Animated.sequence([
                     Animated.parallel([
-                        Animated.timing(pulseScale,   { toValue: 1.75, duration: 900, useNativeDriver: true }),
-                        Animated.timing(pulseOpacity, { toValue: 0,    duration: 900, useNativeDriver: true }),
+                        Animated.timing(pulseScale,   { toValue: 1.75, duration: 900, useNativeDriver: Platform.OS !== 'web' }),
+                        Animated.timing(pulseOpacity, { toValue: 0,    duration: 900, useNativeDriver: Platform.OS !== 'web' }),
                     ]),
                     Animated.parallel([
-                        Animated.timing(pulseScale,   { toValue: 1,    duration: 0,   useNativeDriver: true }),
-                        Animated.timing(pulseOpacity, { toValue: 0.45, duration: 0,   useNativeDriver: true }),
+                        Animated.timing(pulseScale,   { toValue: 1,    duration: 0,   useNativeDriver: Platform.OS !== 'web' }),
+                        Animated.timing(pulseOpacity, { toValue: 0.45, duration: 0,   useNativeDriver: Platform.OS !== 'web' }),
                     ]),
                 ])
             );
@@ -168,6 +169,7 @@ function DashboardScreen({ navigation, route }) {
     const [browserSupported, setBrowserSupported] = useState(true);
   // US23 — show a brief "shift resumed" banner when app relaunched into an active session
   const [resumedBanner, setResumedBanner] = useState(!!route?.params?.resumed);
+  const [transcriptionSegments, setTranscriptionSegments] = useState([]);
 
   useEffect(() => {
     if (!resumedBanner) return;
@@ -195,6 +197,7 @@ function DashboardScreen({ navigation, route }) {
       setCleanupResult,
         setActivePatient,
         setBrowserSupported,
+        setTranscriptionSegments,
     };
     const presenter = new DashboardPresenter(view);
     presenterRef.current = presenter;
@@ -290,7 +293,7 @@ function DashboardScreen({ navigation, route }) {
                 bed={item.bed}
                 name={item.name}
                 isActive={activePatient?.id === item.id}
-                onPress={() => presenterRef.current?.onBedPress(item)}
+                onPress={() => presenterRef.current?.onBedPress(item, navigation)}
               />
             )}
           />

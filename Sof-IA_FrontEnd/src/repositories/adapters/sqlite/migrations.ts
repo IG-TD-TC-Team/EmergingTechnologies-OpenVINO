@@ -226,6 +226,7 @@ export const migrations: Migration[] = [
   {
     version: 3,
     name: 'add_audio_blobs_and_expires_at_indexes',
+
     up: `
       -- Raw audio blob store (Web only — referenced via indexeddb://audio-blobs/<id>)
       CREATE TABLE IF NOT EXISTS audio_blobs (
@@ -241,6 +242,29 @@ export const migrations: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_audio_blobs_expires_at ON audio_blobs(expires_at);
       -- Back-fill missing expires_at index on recording_queue
       CREATE INDEX IF NOT EXISTS idx_recording_queue_expires_at ON recording_queue(expires_at);
+    `,
+  },
+  {
+    version: 4,
+    name: 'add_transcription_segments',
+    up: `
+      CREATE TABLE IF NOT EXISTS transcription_segments (
+        id TEXT PRIMARY KEY NOT NULL,
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        audio_recording_id TEXT,
+        transcript TEXT NOT NULL DEFAULT '',
+        structured_json TEXT,
+        language TEXT NOT NULL DEFAULT 'fr',
+        confidence REAL,
+        ts_start INTEGER,
+        ts_end INTEGER,
+        bed_id TEXT,
+        FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_transcription_segments_session_id ON transcription_segments(session_id);
+      CREATE INDEX IF NOT EXISTS idx_transcription_segments_expires_at ON transcription_segments(expires_at);
     `,
   },
 ];

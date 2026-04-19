@@ -26,6 +26,7 @@ interface SofiaDatabase extends Dexie {
   clinical_notes: Table<any>;
   recording_queue: Table<any>;
   audio_blobs: Table<any>;
+  transcription_segments: Table<any>;
 }
 
 export class DexieAdapter implements IRepository {
@@ -73,6 +74,11 @@ export class DexieAdapter implements IRepository {
       recording_queue: 'id, session_id, status, chunk_ref, expires_at',
       audio_blobs: 'id, session_id, created_at, expires_at',
     });
+
+    // Version 4: transcription segments from the voice pipeline (US6)
+    this.db.version(4).stores({
+      transcription_segments: 'id, session_id, audio_recording_id, bed_id, expires_at',
+    });
   }
 
   /**
@@ -109,6 +115,7 @@ export class DexieAdapter implements IRepository {
       clinical_notes: this.db.clinical_notes,
       recording_queue: this.db.recording_queue,
       audio_blobs: this.db.audio_blobs,
+      transcription_segments: this.db.transcription_segments,
     };
 
     const table = tableMap[store];
@@ -206,10 +213,17 @@ export class DexieAdapter implements IRepository {
     const results = await table
       .where('session_id')
       .equals(sessionId)
-      .reverse() // Reverse chronological order
+      .reverse()
       .sortBy('created_at');
 
     return results as T[];
+  }
+
+  async findByField<T>(store: string, field: string, value: any): Promise<T[]> {
+    await this.ensureInitialized();
+
+    const table = this.getTable(store);
+    return (await table.where(field).equals(value).toArray()) as T[];
   }
 
   /**
@@ -299,6 +313,7 @@ export class DexieAdapter implements IRepository {
       'clinical_notes',
       'recording_queue',
       'audio_blobs',
+      'transcription_segments',
     ];
 
     for (const storeName of stores) {

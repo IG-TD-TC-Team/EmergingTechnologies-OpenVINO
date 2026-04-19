@@ -156,6 +156,15 @@ export class SqliteAdapter implements IRepository {
     return results.map((r) => this.deserializeRecord(r)) as T[];
   }
 
+  async findByField<T>(store: string, field: string, value: any): Promise<T[]> {
+    await this.ensureInitialized();
+
+    const query = `SELECT * FROM ${store} WHERE ${field} = ?`;
+    const results = await this.db.getAllAsync<any>(query, [value]);
+
+    return results.map((r) => this.deserializeRecord(r)) as T[];
+  }
+
   /**
    * Delete multiple records matching a where clause
    */

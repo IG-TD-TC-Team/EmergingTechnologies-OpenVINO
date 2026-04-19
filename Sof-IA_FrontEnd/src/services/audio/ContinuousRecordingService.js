@@ -238,7 +238,7 @@ const ContinuousRecordingService = {
       duration_seconds: durationMs ? durationMs / 1000 : null,
       format_mime_type: mimeType,
       format_codec: isWeb ? 'opus' : 'aac',
-      format_sample_rate: 16000,
+      format_sample_rate: 48000,
       format_channels: 1,
       format_bit_depth: null,
       format_bitrate: 128000,
@@ -256,17 +256,13 @@ const ContinuousRecordingService = {
       expires_at: new Date(Date.now() + 14 * 60 * 60 * 1000).toISOString(),
     });
 
-    // Upload immediately — queue on failure
-    const uploadResult = await ChunkUploadService.upload({
+    // Upload immediately — TranscriptionService queues to OfflineQueueService on failure
+    await ChunkUploadService.upload({
       recordingId: recording.id,
       filePath: uri,
       sessionId: this._sessionId,
       mimeType,
     });
-
-    if (!uploadResult.success) {
-      await OfflineQueueService.enqueue(recording.id, this._sessionId);
-    }
   },
 
   // ─── AsyncStorage persistence ─────────────────────────────────────────────

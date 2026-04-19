@@ -1,11 +1,17 @@
 /**
  * ChunkUploadService
  *
- * Uploads audio chunks from the offline_queue to the transcription API.
+ * Uploads audio chunks from the web service-worker offline_queue to the
+ * transcription API (POST /api/voice/transcribe-and-structure).
+ *
+ * This service handles the OfflineQueueDb (Dexie 'offline_queue') path used
+ * by the web service worker and EndShiftService. Chunks here carry a direct
+ * Blob rather than a filePath, so they cannot go through TranscriptionService
+ * (which expects a filePath or indexeddb:// URI).
  *
  * Contract:
- *   POST /api/transcribe/chunk   multipart/form-data
- *   Fields: audio (Blob), session_id, recording_id, chunk_index, mime_type, patient_id?
+ *   POST /api/voice/transcribe-and-structure   multipart/form-data
+ *   Fields: audio (Blob), session_id, timestamp_start, nurse_id
  *   Success response: 2xx  → chunk is deleted from IndexedDB
  *   Client error:     4xx  → not retried (permanent failure)
  *   Server/network:   5xx / TypeError → retried up to MAX_RETRIES times
@@ -19,8 +25,9 @@
  */
 
 import OfflineQueueDb from './audio/OfflineQueueDb';
+import SessionService from './SessionService';
 
-export const API_ENDPOINT = '/api/transcribe/chunk';
+export const API_ENDPOINT = '/api/voice/transcribe-and-structure';
 export const MAX_RETRIES = 3;
 
 // Exported so tests can set this to 0 without mocking timers
@@ -42,6 +49,14 @@ const ChunkUploadService = {
     async uploadChunk(chunk) {
         let lastError = null;
 
+        // Fetch nurse_id once before the retry loop
+        const session = await SessionService.getActiveShift();
+        const nurseId = session?.nurse_name ?? 'unknown';
+        // Use chunk created_at as the best available timestamp_start approximation
+        const timestampStart = chunk.created_at
+            ? new Date(chunk.created_at).getTime()
+            : Date.now();
+
         for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
             try {
                 const body = new FormData();
@@ -50,11 +65,9 @@ const ChunkUploadService = {
                     chunk.blob,
                     `${chunk.recording_id}_${chunk.chunk_index}.webm`
                 );
-                body.append('session_id',   chunk.session_id);
-                body.append('recording_id', chunk.recording_id);
-                body.append('chunk_index',  String(chunk.chunk_index));
-                body.append('mime_type',    chunk.mime_type);
-                if (chunk.patient_id) body.append('patient_id', chunk.patient_id);
+                body.append('session_id',      chunk.session_id);
+                body.append('timestamp_start', String(timestampStart));
+                body.append('nurse_id',        nurseId);
 
                 const response = await fetch(API_ENDPOINT, { method: 'POST', body });
 

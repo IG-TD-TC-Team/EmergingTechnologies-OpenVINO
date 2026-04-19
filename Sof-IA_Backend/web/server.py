@@ -13,7 +13,8 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import yaml
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel as PydanticModel
@@ -21,9 +22,11 @@ from pydantic import BaseModel as PydanticModel
 import web.jobs as jobs
 import web.sessions as sessions
 from src.benchmark.channels import QueueProgressChannel
+from src.benchmark.factory import ModelFactory
 from src.benchmark.repository import ResultRepository
 from src.benchmark.runner import run_benchmark_async, run_live_slm_async, run_live_asr_async
 from src.logging_config import setup_logging
+from src.pipeline.transcribe_and_structure import run_transcribe_and_structure
 from web.middleware import RequestLoggingMiddleware, audit_event, hash_prompt
 
 _CONFIG_PATH = Path(__file__).resolve().parents[1] / "config" / "models.yaml"
@@ -44,15 +47,38 @@ def _load_yaml_config() -> dict:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging()
-    app.state.config = _load_yaml_config()
+    cfg = _load_yaml_config()
+    app.state.config = cfg
     app.state.repo = ResultRepository()
-    logger.info("server_startup")
+
+    # Pre-load voice pipeline models so the endpoint has zero cold-start latency
+    vp = cfg.get("voice_pipeline", {})
+    asr = ModelFactory.create(vp.get("asr_model", "whisper_openvino"))
+    slm = ModelFactory.create(vp.get("slm_model", "phi3_openvino"))
+    logger.info("server_startup loading voice ASR model=%s", asr.model_id)
+    asr.load()
+    logger.info("server_startup loading voice SLM model=%s", slm.model_id)
+    slm.load()
+    app.state.voice_asr = asr
+    app.state.voice_slm = slm
+
+    prompt_rel = vp.get("extraction_prompt_file", "data/prompts/structured_extraction_prompt.txt")
+    prompt_path = _CONFIG_PATH.parents[1] / prompt_rel
+    app.state.voice_extraction_prompt = prompt_path.read_text(encoding="utf-8")
+    logger.info("server_startup complete")
+
     yield
     logger.info("server_shutdown")
 
 
 app = FastAPI(title="OpenVino Benchmark Dashboard", lifespan=lifespan)
 app.add_middleware(RequestLoggingMiddleware)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["GET", "POST", "DELETE"],
+    allow_headers=["*"],
+)
 
 _STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
@@ -479,6 +505,48 @@ def clear_chat():
 def get_chat_history():
     """Return the current in-memory conversation."""
     return JSONResponse(sessions.get_messages())
+
+
+# ---------------------------------------------------------------------------
+# Routes — voice transcription
+# ---------------------------------------------------------------------------
+
+@app.post("/api/voice/transcribe-and-structure")
+async def transcribe_and_structure(
+    request: Request,
+    audio: UploadFile = File(...),
+    session_id: str = Form(...),
+    timestamp_start: int = Form(...),
+    nurse_id: str = Form(...),
+):
+    """Transcribe an audio chunk and extract structured clinical data.
+
+    Accepts a multipart/form-data POST with:
+      - audio           — WebM/Opus (Chrome) or M4A/AAC (Android)
+      - session_id      — nurse session identifier
+      - timestamp_start — recording start time in ms
+      - nurse_id        — nurse identifier
+
+    Returns the transcript, structured fields, language, confidence, and timestamps.
+    """
+    audio_bytes = await audio.read()
+    result = await run_transcribe_and_structure(
+        audio_bytes=audio_bytes,
+        mime_type=audio.content_type or "audio/webm",
+        session_id=session_id,
+        timestamp_start=timestamp_start,
+        nurse_id=nurse_id,
+        asr_model=request.app.state.voice_asr,
+        slm_model=request.app.state.voice_slm,
+        extraction_prompt_template=request.app.state.voice_extraction_prompt,
+    )
+    audit_event(
+        "voice_transcribed",
+        request.client.host if request.client else "-",
+        session_id=session_id,
+        nurse_id=nurse_id,
+    )
+    return JSONResponse(result)
 
 
 # ---------------------------------------------------------------------------

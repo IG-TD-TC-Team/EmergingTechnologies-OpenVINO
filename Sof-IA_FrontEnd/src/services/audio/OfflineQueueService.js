@@ -13,7 +13,8 @@
 import { Platform } from 'react-native';
 import { v4 as uuidv4 } from 'uuid';
 import { getStorage } from '../../repositories';
-import ChunkUploadService from './ChunkUploadService';
+// TranscriptionService is required lazily in _retryItem to break the circular
+// dependency: TranscriptionService → OfflineQueueService → TranscriptionService
 
 const MAX_RETRIES = 5;
 const BASE_BACKOFF_MS = 5000;
@@ -165,11 +166,13 @@ const OfflineQueueService = {
       return;
     }
 
-    const result = await ChunkUploadService.upload({
+    const TranscriptionService = require('../TranscriptionService').default;
+    const result = await TranscriptionService.processChunk({
       recordingId: recording.id,
       filePath: recording.file_path,
       sessionId: recording.session_id,
       mimeType: recording.format_mime_type,
+      timestampStart: recording.started_at ? new Date(recording.started_at).getTime() : Date.now(),
     });
 
     if (result.success) {

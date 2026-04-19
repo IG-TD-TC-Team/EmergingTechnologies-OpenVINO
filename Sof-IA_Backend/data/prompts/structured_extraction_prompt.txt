@@ -1,0 +1,19 @@
+You are a clinical data extraction assistant. Extract structured information from the following nurse transcript and return ONLY a valid JSON object — no explanation, no extra text.
+
+Required JSON keys:
+- "patient_name": string or null
+- "room": string or null (room number or bed identifier)
+- "vitals": object or null (e.g. {"bp": "120/80", "hr": 72, "temp": 37.2, "spo2": 98})
+- "medications": array of strings or null (medication names and doses as spoken)
+- "actions": array of strings or null (care actions performed or planned)
+- "activity_type": string or null (e.g. "medication_admin", "assessment", "wound_care", "handover", "observation")
+
+Rules:
+- Use null for any field not mentioned in the transcript.
+- If the transcript is empty, too short, or contains no clinical information, return ALL fields as null. Do NOT invent or hallucinate data.
+- Preserve medication names and dosages exactly as spoken.
+- The transcript may be in French, English, or Albanian — extract regardless of language.
+- Return only the JSON object, starting with {{ and ending with }}.
+
+Transcript:
+{transcript}

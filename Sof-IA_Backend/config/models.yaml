@@ -6,6 +6,11 @@ benchmark:
   asr_audio_file: data/benchmark/asr_audio.wav
   asr_reference_file: data/benchmark/asr_reference.txt
 
+voice_pipeline:
+  asr_model: whisper_openvino
+  slm_model: phi3_openvino
+  extraction_prompt_file: data/prompts/structured_extraction_prompt.txt
+
 models:
   phi3_pytorch:
     enabled: true

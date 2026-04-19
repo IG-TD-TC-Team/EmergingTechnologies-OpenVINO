@@ -12,6 +12,7 @@ sentencepiece>=0.2.0
 # ── Audio ────────────────────────────────────────────────────────────────────
 soundfile>=0.12.0
 sounddevice>=0.4.6        # Real-time audio capture from microphone
+pydub>=0.25.1             # WebM/Opus and M4A/AAC decoding (requires ffmpeg on PATH)
 
 # ── Benchmarking & Metrics ───────────────────────────────────────────────────
 psutil>=5.9.0         # Memory / CPU monitoring

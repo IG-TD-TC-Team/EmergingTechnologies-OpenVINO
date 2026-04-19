@@ -7,6 +7,7 @@
  *   setAudioSource({ sourceKey, sourceLabel, canToggle })
  *   setMicStatus(status)
  *   setRecording(isRecording)
+ *   setConnectionStatus('online' | 'offline-buffering')
  *   setBeds(beds)         — array of { id, bed, name, status }
  *   setBedsLoading(bool)  — loading state for bed grid
  */
@@ -18,6 +19,8 @@ import WebRecorderService from '../services/audio/WebRecorderService';
 import ServiceWorkerManager from '../services/audio/ServiceWorkerManager';
 import PermissionsService from '../services/PermissionsService';
 import SessionService from '../services/SessionService';
+
+import ContinuousRecordingService from '../services/audio/ContinuousRecordingService';
 import EndShiftService from '../services/EndShiftService';
 import { getStorage } from '../repositories';
 import StorageKeys from '../constants/storageKeys';
@@ -27,6 +30,9 @@ export default class DashboardPresenter {
         this._view = view;
         this._interval = null;
         this._appStateSub = null;
+
+        this._unsubRecording = null;
+
         this._isRecording = false;
         this._pendingNavigation = null;
         this._activePatient = null;
@@ -38,6 +44,18 @@ export default class DashboardPresenter {
         await this._resolveAudioSource();
         await this._checkPermission();
         await this._loadBeds();
+
+        // Subscribe to recording state changes (isRecording, connectionStatus)
+        this._unsubRecording = ContinuousRecordingService.subscribe(({ isRecording, connectionStatus }) => {
+            this._view.setRecording(isRecording);
+            this._view.setConnectionStatus(connectionStatus);
+        });
+
+        // Restore recording state if app was killed mid-recording
+        await ContinuousRecordingService.initialize();
+
+        // Sync initial recording state to view
+        this._view.setRecording(ContinuousRecordingService.isRecording());
 
         // On web, tell the view whether this browser supports recording.
         // False for anything other than Chrome (no MediaRecorder / codec support).
@@ -97,6 +115,7 @@ export default class DashboardPresenter {
     unmount() {
         if (this._interval) clearInterval(this._interval);
         if (this._appStateSub) this._appStateSub.remove();
+        if (this._unsubRecording) this._unsubRecording();
         AudioSourceResolver.resetOverride();
     }
 
@@ -140,20 +159,28 @@ export default class DashboardPresenter {
         this._view.setMicStatus(status);
         if (status !== 'granted') return;
 
-        if (this._isRecording) {
-            if (WebRecorderService.isSupported()) WebRecorderService.stop();
-            this._isRecording = false;
-            this._view.setRecording(false);
-            await this._persistRecordingState(false);
+        if (Platform.OS === 'web') {
+            if (this._isRecording) {
+                if (WebRecorderService.isSupported()) WebRecorderService.stop();
+                this._isRecording = false;
+                this._view.setRecording(false);
+                await this._persistRecordingState(false);
+            } else {
+                try {
+                    await this._startRecording();
+                } catch (err) {
+                    console.error('[DashboardPresenter] Failed to start web recording:', err);
+                    return;
+                }
+            }
         } else {
-            try {
-                await this._startRecording();
-            } catch (err) {
-                console.error('[DashboardPresenter] Failed to start web recording:', err);
+            const sessionId = await SessionService.getActiveSessionId();
+            if (!sessionId) {
+                console.warn('[DashboardPresenter] No active session — cannot toggle recording');
                 return;
             }
+            await ContinuousRecordingService.toggleRecording(sessionId);
         }
-
 
         // US21: no bed selected → auto-create one and make it active
         if (!this._activePatient) {

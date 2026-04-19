@@ -24,6 +24,8 @@ interface SofiaDatabase extends Dexie {
   audio_recordings: Table<any>;
   transcriptions: Table<any>;
   clinical_notes: Table<any>;
+  recording_queue: Table<any>;
+  audio_blobs: Table<any>;
 }
 
 export class DexieAdapter implements IRepository {
@@ -40,39 +42,36 @@ export class DexieAdapter implements IRepository {
    */
   private defineSchema(): void {
     this.db.version(1).stores({
-      // Sessions table
-      // Primary key: id
-      // Indexes: session_id, status, expires_at
-      // Compound indexes: [session_id+status], [status+expires_at]
       sessions: 'id, session_id, status, expires_at, [session_id+status], [status+expires_at]',
-
-      // Patients table
-      // Primary key: id
-      // Indexes: session_id, status, last_interaction_at, expires_at
-      // Compound indexes: [session_id+status], [session_id+last_interaction_at]
       patients:
         'id, session_id, status, last_interaction_at, expires_at, [session_id+status], [session_id+last_interaction_at]',
-
-      // Audio recordings table
-      // Primary key: id
-      // Indexes: session_id, patient_id, status, expires_at
-      // Compound indexes: [session_id+status], [patient_id+status], [session_id+patient_id]
       audio_recordings:
         'id, session_id, patient_id, status, expires_at, [session_id+status], [patient_id+status], [session_id+patient_id]',
-
-      // Transcriptions table
-      // Primary key: id
-      // Indexes: session_id, audio_recording_id, patient_id, status, expires_at
-      // Compound indexes: [session_id+status], [patient_id+status], [audio_recording_id+status]
       transcriptions:
         'id, session_id, audio_recording_id, patient_id, status, expires_at, [session_id+status], [patient_id+status], [audio_recording_id+status]',
-
-      // Clinical notes table
-      // Primary key: id
-      // Indexes: session_id, patient_id, transcription_id, note_type, reviewed, expires_at
-      // Compound indexes: [session_id+patient_id], [patient_id+note_type], [patient_id+reviewed]
       clinical_notes:
         'id, session_id, patient_id, transcription_id, note_type, reviewed, expires_at, [session_id+patient_id], [patient_id+note_type], [patient_id+reviewed]',
+    });
+
+    // Version 2: adds offline upload queue and raw audio blob store
+    this.db.version(2).stores({
+      sessions: 'id, session_id, status, expires_at, [session_id+status], [status+expires_at]',
+      patients:
+        'id, session_id, status, last_interaction_at, expires_at, [session_id+status], [session_id+last_interaction_at]',
+      audio_recordings:
+        'id, session_id, patient_id, status, expires_at, [session_id+status], [patient_id+status], [session_id+patient_id]',
+      transcriptions:
+        'id, session_id, audio_recording_id, patient_id, status, expires_at, [session_id+status], [patient_id+status], [audio_recording_id+status]',
+      clinical_notes:
+        'id, session_id, patient_id, transcription_id, note_type, reviewed, expires_at, [session_id+patient_id], [patient_id+note_type], [patient_id+reviewed]',
+      recording_queue: 'id, session_id, status, chunk_ref',
+      audio_blobs: 'id, session_id, created_at',
+    });
+
+    // Version 3: index expires_at on recording_queue and audio_blobs so purgeExpired() can use them
+    this.db.version(3).stores({
+      recording_queue: 'id, session_id, status, chunk_ref, expires_at',
+      audio_blobs: 'id, session_id, created_at, expires_at',
     });
   }
 
@@ -108,6 +107,8 @@ export class DexieAdapter implements IRepository {
       audio_recordings: this.db.audio_recordings,
       transcriptions: this.db.transcriptions,
       clinical_notes: this.db.clinical_notes,
+      recording_queue: this.db.recording_queue,
+      audio_blobs: this.db.audio_blobs,
     };
 
     const table = tableMap[store];
@@ -287,6 +288,8 @@ export class DexieAdapter implements IRepository {
       'audio_recordings',
       'transcriptions',
       'clinical_notes',
+      'recording_queue',
+      'audio_blobs',
     ];
 
     for (const storeName of stores) {

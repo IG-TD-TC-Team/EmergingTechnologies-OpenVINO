@@ -45,6 +45,16 @@ jest.mock('expo-sqlite', () => ({
   openDatabaseSync: jest.fn(),
 }));
 
+// Mock ContinuousRecordingService and its native transitive dependencies
+// (expo-av, expo-file-system, ChunkUploadService) so presenter unit tests stay fast and portable.
+jest.mock('./src/services/audio/ContinuousRecordingService', () => ({
+  toggleRecording: jest.fn(),
+  subscribe: jest.fn(() => jest.fn()),
+  unsubscribe: jest.fn(),
+  isRecording: jest.fn().mockReturnValue(false),
+  stop: jest.fn(),
+}));
+
 // Mock react-native-svg
 jest.mock('react-native-svg', () => ({
   SvgXml: 'SvgXml',

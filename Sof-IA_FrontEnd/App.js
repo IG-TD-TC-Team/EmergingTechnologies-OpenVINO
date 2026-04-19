@@ -1,9 +1,12 @@
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useState } from 'react';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import AppNavigator from './src/navigation/AppNavigator';
 import { StorageFactory, LogLevel } from './src/repositories/adapters';
 import { CapabilitiesProvider } from './src/config/CapabilitiesContext';
+import { RecordingProvider, useRecordingContext } from './src/contexts/RecordingContext';
+import RecordingIndicator from './src/screens/RecordingIndicator';
 
 export default function App() {
   const [isStorageReady, setIsStorageReady] = useState(false);
@@ -57,10 +60,29 @@ export default function App() {
   }
 
   return (
-    <CapabilitiesProvider>
+    <SafeAreaProvider>
+      <CapabilitiesProvider>
+        <RecordingProvider>
+          <AppContent />
+        </RecordingProvider>
+      </CapabilitiesProvider>
+    </SafeAreaProvider>
+  );
+}
+
+/**
+ * Inner component that reads RecordingContext so RecordingIndicator
+ * stays mounted across all screen transitions.
+ */
+function AppContent() {
+  const { isRecording, connectionStatus } = useRecordingContext();
+
+  return (
+    <View style={{ flex: 1 }}>
       <AppNavigator />
+      <RecordingIndicator isRecording={isRecording} connectionStatus={connectionStatus} />
       <StatusBar style="auto" />
-    </CapabilitiesProvider>
+    </View>
   );
 }
 

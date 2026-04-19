@@ -7,24 +7,32 @@
  *   setAudioSource({ sourceKey, sourceLabel, canToggle })
  *   setMicStatus(status)
  *   setRecording(isRecording)
+ *   setConnectionStatus('online' | 'offline-buffering')
  *   setBeds(beds)         — array of { id, bed, name, status }
  *   setBedsLoading(bool)  — loading state for bed grid
  */
 
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppState, Platform } from 'react-native';
 import AudioSourceResolver from '../services/audio/AudioSourceResolver';
 import WebRecorderService from '../services/audio/WebRecorderService';
 import ServiceWorkerManager from '../services/audio/ServiceWorkerManager';
 import PermissionsService from '../services/PermissionsService';
 import SessionService from '../services/SessionService';
+
+import ContinuousRecordingService from '../services/audio/ContinuousRecordingService';
 import EndShiftService from '../services/EndShiftService';
 import { getStorage } from '../repositories';
+import StorageKeys from '../constants/storageKeys';
 
 export default class DashboardPresenter {
     constructor(view) {
         this._view = view;
         this._interval = null;
         this._appStateSub = null;
+
+        this._unsubRecording = null;
+
         this._isRecording = false;
         this._pendingNavigation = null;
         this._activePatient = null;
@@ -32,10 +40,22 @@ export default class DashboardPresenter {
 
     // ─── Lifecycle ────────────────────────────────────────────────────────────
 
-    async mount(isResumed = false) {
+    async mount() {
         await this._resolveAudioSource();
         await this._checkPermission();
         await this._loadBeds();
+
+        // Subscribe to recording state changes (isRecording, connectionStatus)
+        this._unsubRecording = ContinuousRecordingService.subscribe(({ isRecording, connectionStatus }) => {
+            this._view.setRecording(isRecording);
+            this._view.setConnectionStatus(connectionStatus);
+        });
+
+        // Restore recording state if app was killed mid-recording
+        await ContinuousRecordingService.initialize();
+
+        // Sync initial recording state to view
+        this._view.setRecording(ContinuousRecordingService.isRecording());
 
         // On web, tell the view whether this browser supports recording.
         // False for anything other than Chrome (no MediaRecorder / codec support).
@@ -48,9 +68,8 @@ export default class DashboardPresenter {
             ServiceWorkerManager.register().catch(() => {});
         }
 
-        if (isResumed) {
-            await this._resumeSession();
-        }
+        // US23 — auto-resume recording if it was active before app closed
+        await this._maybeResumeRecording();
 
         // Poll every 3s — detects plug/unplug and resets override if USB gone
         this._interval = setInterval(() => this._resolveAudioSource(), 3000);
@@ -63,32 +82,40 @@ export default class DashboardPresenter {
         });
     }
 
-    async _resumeSession() {
-        this._view.setResumeBannerVisible(true);
+    async _maybeResumeRecording() {
+        try {
+            const flag = await AsyncStorage.getItem(StorageKeys.WAS_RECORDING);
+            if (flag !== 'true') return;
+            const status = await PermissionsService.check();
+            if (status !== 'granted') return;
+            await this._startRecording();
+        } catch (e) {
+            console.error('[DashboardPresenter] Failed to auto-resume recording:', e);
+        }
+    }
 
-        const sessionId = await SessionService.getActiveSessionId();
-        if (!sessionId) return;
-
-        const wasRecording = await SessionService.getRecordingActive(sessionId);
-        if (!wasRecording) return;
-
+    async _startRecording() {
         if (WebRecorderService.isSupported()) {
-            try {
-                await WebRecorderService.start(sessionId);
-            } catch (err) {
-                console.error('[DashboardPresenter] Failed to resume recording:', err);
-                // Clear persisted flag so we don't retry on every subsequent launch
-                SessionService.setRecordingActive(sessionId, false).catch(() => {});
-                return;
-            }
+            const sessionId = await SessionService.getActiveSessionId();
+            await WebRecorderService.start(sessionId ?? '');
         }
         this._isRecording = true;
         this._view.setRecording(true);
+        await this._persistRecordingState(true);
+    }
+
+    async _persistRecordingState(isRecording) {
+        try {
+            await AsyncStorage.setItem(StorageKeys.WAS_RECORDING, String(isRecording));
+        } catch (e) {
+            console.error('[DashboardPresenter] Failed to persist recording state:', e);
+        }
     }
 
     unmount() {
         if (this._interval) clearInterval(this._interval);
         if (this._appStateSub) this._appStateSub.remove();
+        if (this._unsubRecording) this._unsubRecording();
         AudioSourceResolver.resetOverride();
     }
 
@@ -132,27 +159,30 @@ export default class DashboardPresenter {
         this._view.setMicStatus(status);
         if (status !== 'granted') return;
 
-        if (this._isRecording) {
-            if (WebRecorderService.isSupported()) WebRecorderService.stop();
-            this._isRecording = false;
-            this._view.setRecording(false);
-        } else {
-            if (WebRecorderService.isSupported()) {
+        if (Platform.OS === 'web') {
+            if (this._isRecording) {
+                if (WebRecorderService.isSupported()) WebRecorderService.stop();
+                this._isRecording = false;
+                this._view.setRecording(false);
+                await this._persistRecordingState(false);
+            } else {
                 try {
-                    const sessionId = await SessionService.getActiveSessionId();
-                    await WebRecorderService.start(sessionId ?? '');
+                    await this._startRecording();
                 } catch (err) {
                     console.error('[DashboardPresenter] Failed to start web recording:', err);
                     return;
                 }
             }
-            this._isRecording = true;
-            this._view.setRecording(true);
+        } else {
+            const sessionId = await SessionService.getActiveSessionId();
+            if (!sessionId) {
+                console.warn('[DashboardPresenter] No active session — cannot toggle recording');
+                return;
+            }
+            await ContinuousRecordingService.toggleRecording(sessionId);
         }
 
-        const sessionId = await SessionService.getActiveSessionId();
-        if (sessionId) SessionService.setRecordingActive(sessionId, this._isRecording).catch(() => {});
-
+        // US21: no bed selected → auto-create one and make it active
         if (!this._activePatient) {
             const patient = await this._autoCreatePatient();
             if (patient) {
@@ -258,18 +288,20 @@ export default class DashboardPresenter {
         await storage.create('patients', { ...basePatient, name: 'Bob', bed: '2' });
     }
 
+    // US21 — tap a bed card to set it as the active patient context
     onBedPress(patient) {
         this._activePatient = { id: patient.id, name: patient.name, bed: patient.bed };
         this._view.setActivePatient(this._activePatient);
     }
 
+    // US21 — X button on the active patient chip resets context to none
     onClearActivePatient() {
         this._activePatient = null;
         this._view.setActivePatient(null);
     }
 
     /**
-     * Returns hint fields to include in the transcription API request.
+     * US21 — Returns hint fields to include in the transcription API request.
      * The API uses these as soft hints to improve structuration confidence;
      * they are not binding — the API can still detect other patients from speech.
      *
@@ -281,12 +313,6 @@ export default class DashboardPresenter {
             hint_patient_name: this._activePatient.name,
             hint_room: this._activePatient.bed,
         };
-    }
-
-    // ─── Resume banner ───────────────────────────────────────────────────────
-
-    onDismissResumeBanner() {
-        this._view.setResumeBannerVisible(false);
     }
 
     // ─── End Shift ────────────────────────────────────────────────────────────
@@ -335,19 +361,10 @@ export default class DashboardPresenter {
         return success;
     }
 
-    async _proceedWithCleanup(_navigation) {
+    async _proceedWithCleanup(navigation) {
         this._pendingNavigation = null;
 
-        // Stop any active recording before wiping the session
-        if (this._isRecording) {
-            if (WebRecorderService.isSupported()) WebRecorderService.stop();
-            this._isRecording = false;
-            this._view.setRecording(false);
-        }
-
         const sessionId = await SessionService.getActiveSessionId();
-
-        if (sessionId) SessionService.setRecordingActive(sessionId, false).catch(() => {});
 
         this._view.setCleanupProgress(true);
         const result = await EndShiftService.run(sessionId ?? '');
@@ -368,6 +385,7 @@ export default class DashboardPresenter {
             this._isRecording = false;
             this._view.setRecording(false);
         }
+        this._persistRecordingState(false);
 // Clear active patient — shift is over
         if (this._activePatient) {
             this._activePatient = null;

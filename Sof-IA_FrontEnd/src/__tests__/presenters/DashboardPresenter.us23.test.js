@@ -1,16 +1,14 @@
-
 /**
- * DashboardPresenter — US23: Automatic shift resume
+ * DashboardPresenter — US23: Recording auto-resume on app relaunch
  *
  * Tests:
- *   - mount(true)  + recording was active  → auto-resumes recording + shows banner
- *   - mount(true)  + recording not active  → shows banner only (no recording start)
- *   - mount(true)  + no active session     → shows banner, skips recording check
- *   - mount(false) (default)               → no banner, no recording start
- *   - onMicPress start                     → persists recording state ON
- *   - onMicPress stop                      → persists recording state OFF
- *   - onDismissResumeBanner                → hides the banner
- *   - _proceedWithCleanup (via onOfflineGateForceDelete) → clears recording state
+ *   - _maybeResumeRecording with WAS_RECORDING=true + granted → auto-starts recording
+ *   - _maybeResumeRecording with WAS_RECORDING=false → no auto-start
+ *   - _maybeResumeRecording with WAS_RECORDING missing → no auto-start
+ *   - _maybeResumeRecording with permission denied → no auto-start
+ *   - onMicPress start → persists WAS_RECORDING=true
+ *   - onMicPress stop  → persists WAS_RECORDING=false
+ *   - onSuccessDismiss → clears WAS_RECORDING
  */
 
 // ─── React Native mock ────────────────────────────────────────────────────────
@@ -23,22 +21,17 @@ jest.mock('react-native', () => ({
   },
 }));
 
-// ─── Service / dependency mocks ───────────────────────────────────────────────
+// ─── Service mocks ────────────────────────────────────────────────────────────
 
 jest.mock('../../services/EndShiftService', () => ({
   __esModule: true,
-  default: {
-    flushQueue: jest.fn(),
-    run: jest.fn(),
-  },
+  default: { flushQueue: jest.fn(), run: jest.fn() },
 }));
 
 jest.mock('../../services/SessionService', () => ({
   __esModule: true,
   default: {
     getActiveSessionId: jest.fn(),
-    getRecordingActive: jest.fn(),
-    setRecordingActive: jest.fn(),
     clearCache: jest.fn(),
   },
 }));
@@ -46,21 +39,32 @@ jest.mock('../../services/SessionService', () => ({
 jest.mock('../../services/audio/AudioSourceResolver', () => ({
   __esModule: true,
   default: {
-    resolve: jest.fn().mockResolvedValue({
-      getSourceKey: () => 'builtin',
-      getSourceLabel: () => 'Built-in mic',
-    }),
-    getAvailableSources: jest.fn().mockResolvedValue([]),
+    resolve: jest.fn(),
+    getAvailableSources: jest.fn(),
     toggle: jest.fn(),
     resetOverride: jest.fn(),
   },
 }));
 
+jest.mock('../../services/audio/WebRecorderService', () => ({
+  __esModule: true,
+  default: {
+    isSupported: jest.fn(),
+    start: jest.fn(),
+    stop: jest.fn(),
+  },
+}));
+
+jest.mock('../../services/audio/ServiceWorkerManager', () => ({
+  __esModule: true,
+  default: { register: jest.fn() },
+}));
+
 jest.mock('../../services/PermissionsService', () => ({
   __esModule: true,
   default: {
-    check: jest.fn().mockResolvedValue('granted'),
-    ensure: jest.fn().mockResolvedValue('granted'),
+    check: jest.fn(),
+    ensure: jest.fn(),
     request: jest.fn(),
     openSettings: jest.fn(),
   },
@@ -69,35 +73,18 @@ jest.mock('../../services/PermissionsService', () => ({
 jest.mock('../../repositories', () => ({
   getStorage: jest.fn().mockResolvedValue({
     queryBySession: jest.fn().mockResolvedValue([]),
-    create: jest.fn(),
+    create: jest.fn().mockResolvedValue(null),
     bulkDelete: jest.fn().mockResolvedValue(0),
   }),
-}));
-
-// WebRecorderService: controlled by each test via mockReturnValue
-jest.mock('../../services/audio/WebRecorderService', () => ({
-  __esModule: true,
-  default: {
-    isSupported: jest.fn(),
-    isRecording: jest.fn().mockReturnValue(false),
-    start: jest.fn().mockResolvedValue(undefined),
-    stop: jest.fn(),
-  },
-}));
-
-jest.mock('../../services/audio/ServiceWorkerManager', () => ({
-  __esModule: true,
-  default: {
-    register: jest.fn().mockResolvedValue(undefined),
-    requestSync: jest.fn().mockResolvedValue(undefined),
-  },
 }));
 
 // ─── Subject under test ───────────────────────────────────────────────────────
 
 import DashboardPresenter from '../../presenters/DashboardPresenter';
+import PermissionsService from '../../services/PermissionsService';
 import SessionService from '../../services/SessionService';
 import EndShiftService from '../../services/EndShiftService';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import WebRecorderService from '../../services/audio/WebRecorderService';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -116,7 +103,6 @@ function makeView() {
     setCleanupResult: jest.fn(),
     setActivePatient: jest.fn(),
     setBrowserSupported: jest.fn(),
-    setResumeBannerVisible: jest.fn(),
   };
 }
 
@@ -126,251 +112,112 @@ function makeNavigation() {
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
-describe('DashboardPresenter — US23 shift resume', () => {
-  let presenter;
+describe('DashboardPresenter — US23 recording auto-resume', () => {
   let view;
   let navigation;
-
-  afterEach(() => {
-    presenter.unmount(); // clears the polling interval started by mount()
-  });
 
   beforeEach(() => {
     jest.clearAllMocks();
 
-    SessionService.getActiveSessionId.mockResolvedValue('session_test_123');
-    SessionService.getRecordingActive.mockResolvedValue(false);
-    SessionService.setRecordingActive.mockResolvedValue(undefined);
-
-    WebRecorderService.isSupported.mockReturnValue(true);
-
-    view = makeView();
-    navigation = makeNavigation();
-    presenter = new DashboardPresenter(view);
+    // Re-apply implementations after clearAllMocks
+    PermissionsService.check.mockResolvedValue('granted');
+    PermissionsService.ensure.mockResolvedValue('granted');
+    SessionService.getActiveSessionId.mockResolvedValue('session_test');
+    WebRecorderService.isSupported.mockReturnValue(false);
+    WebRecorderService.start.mockResolvedValue(undefined);
+    AsyncStorage.getItem.mockResolvedValue(null);
+    AsyncStorage.setItem.mockResolvedValue(undefined);
   });
 
-  // ── mount(true) — recording was active ────────────────────────────────────
+  // ── _maybeResumeRecording ─────────────────────────────────────────────────
 
-  describe('mount(true) — recording was active', () => {
-    beforeEach(() => {
-      SessionService.getRecordingActive.mockResolvedValue(true);
-    });
-
-    it('shows the resume banner', async () => {
-      await presenter.mount(true);
-      expect(view.setResumeBannerVisible).toHaveBeenCalledWith(true);
-    });
-
-    it('starts the web recorder with the active session ID', async () => {
-      await presenter.mount(true);
-      expect(WebRecorderService.start).toHaveBeenCalledWith('session_test_123');
-    });
-
-    it('sets recording state to true', async () => {
-      await presenter.mount(true);
+  describe('_maybeResumeRecording()', () => {
+    it('auto-starts recording when WAS_RECORDING=true and permission granted', async () => {
+      AsyncStorage.getItem.mockResolvedValue('true');
+      view = makeView();
+      const presenter = new DashboardPresenter(view);
+      await presenter._maybeResumeRecording();
       expect(view.setRecording).toHaveBeenCalledWith(true);
       expect(presenter._isRecording).toBe(true);
     });
-  });
 
-  // ── mount(true) — recording was NOT active ────────────────────────────────
-
-  describe('mount(true) — recording was not active', () => {
-    beforeEach(() => {
-      SessionService.getRecordingActive.mockResolvedValue(false);
-    });
-
-    it('shows the resume banner', async () => {
-      await presenter.mount(true);
-      expect(view.setResumeBannerVisible).toHaveBeenCalledWith(true);
-    });
-
-    it('does NOT start the recorder', async () => {
-      await presenter.mount(true);
-      expect(WebRecorderService.start).not.toHaveBeenCalled();
-    });
-
-    it('does NOT set recording state to true', async () => {
-      await presenter.mount(true);
-      expect(view.setRecording).not.toHaveBeenCalledWith(true);
+    it('does NOT auto-start when WAS_RECORDING=false', async () => {
+      AsyncStorage.getItem.mockResolvedValue('false');
+      view = makeView();
+      const presenter = new DashboardPresenter(view);
+      await presenter._maybeResumeRecording();
+      expect(view.setRecording).not.toHaveBeenCalled();
       expect(presenter._isRecording).toBe(false);
     });
-  });
 
-  // ── mount(true) — no active session ──────────────────────────────────────
-
-  describe('mount(true) — no active session', () => {
-    beforeEach(() => {
-      SessionService.getActiveSessionId.mockResolvedValue(null);
+    it('does NOT auto-start when WAS_RECORDING is absent', async () => {
+      AsyncStorage.getItem.mockResolvedValue(null);
+      view = makeView();
+      const presenter = new DashboardPresenter(view);
+      await presenter._maybeResumeRecording();
+      expect(view.setRecording).not.toHaveBeenCalled();
     });
 
-    it('still shows the resume banner', async () => {
-      await presenter.mount(true);
-      expect(view.setResumeBannerVisible).toHaveBeenCalledWith(true);
+    it('does NOT auto-start when permission is denied', async () => {
+      AsyncStorage.getItem.mockResolvedValue('true');
+      PermissionsService.check.mockResolvedValue('denied');
+      view = makeView();
+      const presenter = new DashboardPresenter(view);
+      await presenter._maybeResumeRecording();
+      expect(view.setRecording).not.toHaveBeenCalled();
+      expect(presenter._isRecording).toBe(false);
     });
 
-    it('does NOT query recording state when sessionId is null', async () => {
-      await presenter.mount(true);
-      expect(SessionService.getRecordingActive).not.toHaveBeenCalled();
-    });
-  });
-
-  // ── mount(false) — fresh start ────────────────────────────────────────────
-
-  describe('mount(false) — fresh start', () => {
-    it('does NOT show the resume banner', async () => {
-      await presenter.mount(false);
-      expect(view.setResumeBannerVisible).not.toHaveBeenCalled();
-    });
-
-    it('does NOT start the recorder', async () => {
-      await presenter.mount(false);
-      expect(WebRecorderService.start).not.toHaveBeenCalled();
+    it('persists WAS_RECORDING=true after auto-resuming', async () => {
+      AsyncStorage.getItem.mockResolvedValue('true');
+      view = makeView();
+      const presenter = new DashboardPresenter(view);
+      await presenter._maybeResumeRecording();
+      expect(AsyncStorage.setItem).toHaveBeenCalledWith('was_recording', 'true');
     });
   });
 
-  describe('mount() default — same as mount(false)', () => {
-    it('does NOT show the resume banner', async () => {
-      await presenter.mount();
-      expect(view.setResumeBannerVisible).not.toHaveBeenCalled();
-    });
-  });
-
-  // ── onMicPress — persists recording state ─────────────────────────────────
+  // ── onMicPress — recording state persistence ──────────────────────────────
 
   describe('onMicPress — recording state persistence', () => {
-    it('persists state ON when starting recording', async () => {
+    it('saves WAS_RECORDING=true when recording starts', async () => {
+      view = makeView();
+      const presenter = new DashboardPresenter(view);
       await presenter.onMicPress();
-      expect(SessionService.setRecordingActive).toHaveBeenCalledWith(
-        'session_test_123',
-        true
-      );
+      expect(AsyncStorage.setItem).toHaveBeenCalledWith('was_recording', 'true');
     });
 
-    it('persists state OFF when stopping recording', async () => {
+    it('saves WAS_RECORDING=false when recording stops', async () => {
+      view = makeView();
+      const presenter = new DashboardPresenter(view);
       presenter._isRecording = true;
       await presenter.onMicPress();
-      expect(SessionService.setRecordingActive).toHaveBeenCalledWith(
-        'session_test_123',
-        false
-      );
-    });
-
-    it('does not persist when there is no active session', async () => {
-      SessionService.getActiveSessionId.mockResolvedValue(null);
-      await presenter.onMicPress();
-      expect(SessionService.setRecordingActive).not.toHaveBeenCalled();
+      expect(AsyncStorage.setItem).toHaveBeenCalledWith('was_recording', 'false');
     });
   });
 
-  // ── onDismissResumeBanner ─────────────────────────────────────────────────
+  // ── onSuccessDismiss — clears flag on shift end ───────────────────────────
 
-  describe('onDismissResumeBanner', () => {
-    it('hides the banner', () => {
-      presenter.onDismissResumeBanner();
-      expect(view.setResumeBannerVisible).toHaveBeenCalledWith(false);
-    });
-  });
-
-  // ── _proceedWithCleanup clears recording state ────────────────────────────
-
-  describe('_proceedWithCleanup — clears recording state', () => {
-    beforeEach(() => {
+  describe('onSuccessDismiss', () => {
+    it('clears WAS_RECORDING when shift ends', () => {
       EndShiftService.run.mockResolvedValue({ success: true, failedItems: [], durationMs: 50 });
+      view = makeView();
+      navigation = makeNavigation();
+      const presenter = new DashboardPresenter(view);
+      presenter.onSuccessDismiss(navigation);
+      expect(AsyncStorage.setItem).toHaveBeenCalledWith('was_recording', 'false');
     });
 
-    it('calls setRecordingActive(false) before running cleanup', async () => {
-      await presenter.onOfflineGateForceDelete(navigation);
-      expect(SessionService.setRecordingActive).toHaveBeenCalledWith(
-        'session_test_123',
-        false
-      );
-    });
-
-    it('runs EndShiftService.run after clearing recording state', async () => {
-      await presenter.onOfflineGateForceDelete(navigation);
-      const setRecordingOrder = SessionService.setRecordingActive.mock.invocationCallOrder[0];
-      const runOrder = EndShiftService.run.mock.invocationCallOrder[0];
-      expect(setRecordingOrder).toBeLessThan(runOrder);
-    });
-  });
-
-  // ── _resumeSession — WebRecorderService.start() fails ────────────────────
-
-  describe('mount(true) — recorder start fails', () => {
-    beforeEach(() => {
-      SessionService.getRecordingActive.mockResolvedValue(true);
-      WebRecorderService.start.mockRejectedValue(new Error('Device unavailable'));
-    });
-
-    it('does NOT set _isRecording to true', async () => {
-      await presenter.mount(true);
-      expect(presenter._isRecording).toBe(false);
-    });
-
-    it('clears the persisted recording flag so the next launch does not retry', async () => {
-      await presenter.mount(true);
-      expect(SessionService.setRecordingActive).toHaveBeenCalledWith(
-        'session_test_123',
-        false
-      );
-    });
-
-    it('still shows the resume banner', async () => {
-      await presenter.mount(true);
-      expect(view.setResumeBannerVisible).toHaveBeenCalledWith(true);
-    });
-  });
-
-  // ── _proceedWithCleanup — stops recorder if active ───────────────────────
-
-  describe('_proceedWithCleanup — stops recorder when active', () => {
-    beforeEach(() => {
-      EndShiftService.run.mockResolvedValue({ success: true, failedItems: [], durationMs: 50 });
-    });
-
-    it('stops the web recorder if recording was active', async () => {
+    it('does not leave WAS_RECORDING=true if recording was active on shift end', () => {
+      view = makeView();
+      navigation = makeNavigation();
+      const presenter = new DashboardPresenter(view);
       presenter._isRecording = true;
-      await presenter.onOfflineGateForceDelete(navigation);
-      expect(WebRecorderService.stop).toHaveBeenCalled();
-    });
-
-    it('resets _isRecording to false and calls setRecording(false)', async () => {
-      presenter._isRecording = true;
-      await presenter.onOfflineGateForceDelete(navigation);
-      expect(presenter._isRecording).toBe(false);
-      expect(view.setRecording).toHaveBeenCalledWith(false);
-    });
-
-    it('does NOT call stop when not recording', async () => {
-      presenter._isRecording = false;
-      await presenter.onOfflineGateForceDelete(navigation);
-      expect(WebRecorderService.stop).not.toHaveBeenCalled();
-    });
-  });
-
-  // ── WebRecorderService not supported ─────────────────────────────────────
-
-  describe('mount(true) — WebRecorderService not supported', () => {
-    beforeEach(() => {
-      WebRecorderService.isSupported.mockReturnValue(false);
-      SessionService.getRecordingActive.mockResolvedValue(true);
-    });
-
-    it('shows the resume banner', async () => {
-      await presenter.mount(true);
-      expect(view.setResumeBannerVisible).toHaveBeenCalledWith(true);
-    });
-
-    it('does NOT call WebRecorderService.start', async () => {
-      await presenter.mount(true);
-      expect(WebRecorderService.start).not.toHaveBeenCalled();
-    });
-
-    it('still marks recording as active in presenter state', async () => {
-      await presenter.mount(true);
-      expect(presenter._isRecording).toBe(true);
-      expect(view.setRecording).toHaveBeenCalledWith(true);
+      presenter.onSuccessDismiss(navigation);
+      const lastCall = AsyncStorage.setItem.mock.calls.find(
+        ([key]) => key === 'was_recording'
+      );
+      expect(lastCall[1]).toBe('false');
     });
   });
 });

@@ -22,7 +22,10 @@ const AudioSourceResolver = {
      * Respects manual override if the selected source is still available.
      */
     async resolve() {
-        if (capabilities.isWeb) return DeviceMicStrategy;
+        if (capabilities.isWeb) {
+            await DeviceMicStrategy.refreshLabel();
+            return DeviceMicStrategy;
+        }
 
         const usbAvailable = await USBMicStrategy.isAvailable();
 

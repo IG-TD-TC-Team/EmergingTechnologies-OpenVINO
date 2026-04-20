@@ -19,11 +19,42 @@ jest.mock('react-native', () => ({
   TouchableOpacity: 'TouchableOpacity',
   ScrollView: 'ScrollView',
   SafeAreaView: 'SafeAreaView',
+  FlatList: function FlatList({ data = [], renderItem, ListHeaderComponent, ListEmptyComponent }) {
+    const React = require('react');
+    const parts = [];
+    if (ListHeaderComponent) {
+      const H = typeof ListHeaderComponent === 'function' ? ListHeaderComponent : () => ListHeaderComponent;
+      parts.push(React.createElement(H, { key: '__header' }));
+    }
+    if (data.length === 0 && ListEmptyComponent) {
+      const E = typeof ListEmptyComponent === 'function' ? ListEmptyComponent : () => ListEmptyComponent;
+      parts.push(React.createElement(E, { key: '__empty' }));
+    }
+    (data || []).forEach((item, index) => {
+      if (renderItem) parts.push(renderItem({ item, index }));
+    });
+    return React.createElement('View', { testID: 'flatlist' }, ...parts);
+  },
+  Modal: 'Modal',
+  Pressable: 'Pressable',
   Switch: 'Switch',
   Alert: {
     alert: jest.fn(),
   },
   ActivityIndicator: 'ActivityIndicator',
+  Animated: {
+    Value: jest.fn(function (val) {
+      this._value = val;
+      this.setValue   = jest.fn((v) => { this._value = v; });
+      this.interpolate = jest.fn((cfg) => cfg.outputRange ? cfg.outputRange[0] : 0);
+    }),
+    timing:   jest.fn(() => ({ start: jest.fn() })),
+    loop:     jest.fn(() => ({ start: jest.fn(), stop: jest.fn() })),
+    sequence: jest.fn((anims) => ({ start: jest.fn() })),
+    parallel: jest.fn((anims) => ({ start: jest.fn() })),
+    View: 'Animated.View',
+    Text: 'Animated.Text',
+  },
 }));
 
 // Mock AsyncStorage

@@ -21,15 +21,17 @@ const ChunkUploadService = {
    * @param {string} params.filePath     — uri returned by strategy.stopChunk()
    * @param {string} params.sessionId
    * @param {string} params.mimeType     — 'audio/mp4' | 'audio/webm'
+   * @param {string|null} [params.patientId] — patient the recording belongs to
    * @param {number} [params.timestampStart] — recording start in ms (defaults to now)
    * @returns {Promise<{success: boolean, error?: string}>}
    */
-  async upload({ recordingId, filePath, sessionId, mimeType, timestampStart }) {
+  async upload({ recordingId, filePath, sessionId, mimeType, patientId = null, timestampStart }) {
     return TranscriptionService.processChunk({
       recordingId,
       filePath,
       sessionId,
       mimeType,
+      patientId,
       timestampStart: timestampStart ?? Date.now(),
     });
   },

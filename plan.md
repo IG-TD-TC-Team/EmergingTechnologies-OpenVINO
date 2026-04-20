@@ -1,190 +1,224 @@
-# US6 — Real-time Voice Transcription & Structured Data Extraction
+# US10 — Patient Details Dashboard ("What do I know")
 
-**Story**: As a nurse I want spoken words converted to text in real-time during patient care so that the system can analyze conversations and extract structured data for my workflow.
+**Story**: As a nurse I want to see all information Sofia knows about a specific patient organized in cards so that I have a complete overview of their current status, medications, and activities.
 
-**Points**: 8 | **Sprint**: Sprint 2 | **Predecessor**: US5 | **Successors**: US11, US14, US22
+**Points**: 3 | **Sprint**: Sprint 3 | **Predecessor**: US9 | **Successors**: US11, US19, US22
+
+**Figma Design**: https://www.figma.com/design/xatJv9J3dQWl258H1l4eWM/Sof-IA-HealthCare-assistant?node-id=0-1&t=wM6oBNnyuvEnom4G-1
+**Figma Prototype**: https://www.figma.com/proto/xatJv9J3dQWl258H1l4eWM/Sof-IA-HealthCare-assistant?node-id=7-2251&starting-point-node-id=7%3A2250
+
+---
+
+## Sprint 3 Story Map
+
+These 4 stories form a layered stack on the same `BedDetails` screen area. US10 is the foundation; the others extend it.
+
+| US | Owner | What it owns |
+|---|---|---|
+| **US10** (this branch) | Julio | Screen shell, card UI components, `BedDetailScreen` rewrite, navigation entry point |
+| **US22** | Tatiana | Dedicated storage tables (`medications`, `vital_signs`, `allergies`, `safety_info`), richer card schemas, `flagged`/`confidence` system, real-time updates from API |
+| **US11** | — | `ActivityDetailScreen` — tap Recent Activity card → full clinical narrative + collapsible translation |
+| **US19** | — | `CorrectionScreen` — tap flagged card → edit AI values locally, audit trail |
+
+### Layering contract
+
+- **US10** reads card data from `transcription_segments.structured_json` — this is intentionally temporary. When US22 lands, Tatiana replaces the data source in `PatientDetailsPresenter._loadCards()` to read from dedicated tables. The view (`BedDetailScreen`) is not touched.
+- **US10 `InfoCard` must already accept `flagged` + `confidence` props** so US22 can set them without touching the component.
+- **`onCardPress`** passes `{ card, patient }` to navigation. US11 adds the `ActivityDetail` route; US19 adds `CorrectionScreen`. US10 stubs both with a `console.log` — do NOT add blank nav routes in `AppNavigator.js`.
+- **Storage tables** (`medications`, `vital_signs`, `allergies`, `safety_info`) are US22's responsibility. US10 creates no new migrations.
 
 ---
 
 ## Context & Constraints
 
-- No dedicated UI — pure background service consuming audio chunks from US5 (`WebRecorderService` / `ContinuousRecordingService`)
-- API endpoint: `POST /api/voice/transcribe-and-structure` (NOT the existing `/voice/transcribe`)
-- Response must be stored in a new `transcription_segments` table (separate from existing `transcriptions`)
-- TTL = session start + 14h (current default is 30 days — must override)
-- No raw audio persisted beyond the API call
-- Data must survive app restart (loaded from storage on mount)
-- Offline chunks go to the existing `OfflineQueueService` for retry
+- **Entry point**: tap a bed card on the Main Dashboard → navigates to `BedDetails` (already registered in `AppNavigator.js`).
+- **Existing file** `src/screens/BedDetailScreen.js` is a placeholder — must be **fully replaced**.
+- **Architecture**: MVP — `PatientDetailsPresenter.js` owns all logic; `BedDetailScreen.js` is pure view.
+- **Data source (US10)**: `transcription_segments`, queried per session and filtered by `bed_id == patient.id`.
+- `DashboardPresenter.onBedPress` currently passes `{ patient, segments }` — add `sessionId` so `PatientDetailsPresenter` can poll for live updates.
+- **Bottom controls** are the same as the Main Dashboard — reuse `AudioSourceBadge` / `MicInputIcon`.
+- **Do NOT add** `ActivityDetail` or `CorrectionScreen` routes to `AppNavigator.js` (US11/US19 own those).
 
 ---
 
-## API Contract
+## Card Specification
 
-**Request** — `POST /api/voice/transcribe-and-structure`
-```
-multipart/form-data
-  audio        — Blob (WebM/Opus from Chrome, M4A/AAC from Android)
-  session_id   — string
-  timestamp_start — number (ms)
-  nurse_id     — string
-```
+Cards are displayed in this fixed priority order:
 
-**Response**
-```json
+| # | Card type | Icon | Data source (US10) | Always shown | Tappable |
+|---|---|---|---|---|---|
+| 1 | Session Active | Shield | `sessions.started_at` / `expires_at` | Yes (if active session) | No |
+| 2 | Recent Activity | Clock | Latest `transcription_segments` row | No | Yes (eye icon if hasData) |
+| 3 | Medications | Pill | `medications[]` across segments, deduplicated | No | Yes |
+| 4 | Next Reminder | Bell | `actions[]` across segments (first action) | No | Yes |
+| 5 | Vital Signs | Heart | Latest `vitals` object from segments | No | Yes |
+| 6 | Allergies | Warning | `patients.allergies` field | No | Yes |
+| 7 | Safety Information | Info | `patients.notes` field | No | Yes |
+
+**Card props (forward-compatible with US22)**:
+```js
 {
-  "transcript": "string",
-  "structured": {
-    "patient_name": "string | null",
-    "room": "string | null",
-    "vitals": "object | null",
-    "medications": "string[] | null",
-    "actions": "string[] | null",
-    "activity_type": "string | null"
-  },
-  "language": "en | fr | sq | ...",
-  "confidence": 0.0,
-  "timestamp_start": 0,
-  "timestamp_end": 0
+  type: string,           // 'recent_activity' | 'medications' | 'vital_signs' | ...
+  hasData: bool,          // true → show green eye icon
+  flagged: bool,          // false in US10; US22 sets true when confidence < threshold
+  confidence: number,     // 1.0 in US10 (no AI scoring yet); US22 sets real value
+  preview: string,        // one-line summary text
+  items?: any[],          // structured data for detail screens (US11/US19)
+  data?: object,          // raw object (vitals)
 }
 ```
+
+**Card interaction**:
+- `hasData && !flagged` → green eye icon top-right, tap → `onCardPress` (stub for US11/US19)
+- `flagged` → orange/yellow background, warning icon instead of eye, tap → `onCardPress` (stub for US19)
+- `!hasData` → muted card, no icon, tap → `onCardPress` (stub for US19)
+
+**Empty state**: Session Active card + `"No information extracted yet. Start recording to capture patient data."`
+
+**Animations**: fade-in slide when a new card appears; brief pulse scale on card data update.
+
+---
+
+## Screen Header
+
+```
+[←]   [patient icon + bed icon]   "What do I know"
+[AudioSourceBadge — green: "Rode Wireless Mini connected" / gray: "Using device mic"]
+[Bed X: 'Name']   ← patient identifier, below badge
+```
+
+---
+
+## Execution Order
+
+| Step | Status | Description |
+|---|---|---|
+| F1 | ✓ Done | `PatientDetailsPresenter.js` — mount, card aggregation, live polling |
+| F2 | ✓ Done | Rewrite `BedDetailScreen.js` — full "What do I know" UI |
+| F3 | ✓ Done | Update `DashboardPresenter.onBedPress` — add `sessionId` to nav params |
+| F4 | ✓ Done | Tests |
 
 ---
 
 ## Implementation Steps
 
-### Step 1 — Add `transcription_segments` table to storage layer
+### ~~Step 1 — `PatientDetailsPresenter.js`~~ ✓
 
-**File: `src/repositories/adapters/dexie/DexieAdapter.ts`**
-- Add Dexie **version 3** stores block keeping all v2 stores plus:
-  ```
-  transcription_segments: 'id, session_id, audio_recording_id, bed_id, status, expires_at, [session_id+status]'
-  ```
-- Add `transcription_segments` to `getTable()` map and `purgeExpired()` loop.
+**File**: `src/presenters/PatientDetailsPresenter.js` — created.
 
-**File: `src/repositories/adapters/sqlite/migrations.ts`**
-- Add **migration version 3** (`add_transcription_segments`):
-  ```sql
-  CREATE TABLE IF NOT EXISTS transcription_segments (
-    id TEXT PRIMARY KEY NOT NULL,
-    created_at TEXT NOT NULL,
-    expires_at TEXT NOT NULL,
-    session_id TEXT NOT NULL,
-    audio_recording_id TEXT,
-    transcript TEXT NOT NULL DEFAULT '',
-    structured_json TEXT,        -- JSON: patient_name, room, vitals, medications, actions, activity_type
-    language TEXT NOT NULL DEFAULT 'fr',
-    confidence REAL,
-    ts_start INTEGER,
-    ts_end INTEGER,
-    bed_id TEXT,
-    FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
-  );
-  CREATE INDEX IF NOT EXISTS idx_transcription_segments_session_id ON transcription_segments(session_id);
-  CREATE INDEX IF NOT EXISTS idx_transcription_segments_expires_at ON transcription_segments(expires_at);
-  ```
+Key behaviours:
+- `mount({ patient, sessionId })` → resolves audio source, loads session card, loads info cards, subscribes to recording state, starts 5s poll.
+- `_loadCards()` → queries `transcription_segments` by session, filters by `bed_id`, calls `buildCards()`, only calls `setCards` when result changes (JSON key diff).
+- `buildCards(segments, patient)` exported as pure function for unit tests and future replacement by US22.
+- `onCardPress(card, navigation)` stubs with `console.log` — US11/US19 will implement.
 
 ---
 
-### Step 2 — Create `TranscriptionService.js`
+### Step 2 — Rewrite `BedDetailScreen.js` (F2)
 
-**New file: `src/services/TranscriptionService.js`**
+**File**: `src/screens/BedDetailScreen.js` — full replacement.
 
-Responsibilities:
-- Call `POST /api/voice/transcribe-and-structure` with the audio chunk
-- Persist the response to `transcription_segments` with TTL = session start + 14h
-- On API success: mark `audio_recording` status → `'transcribed'`, delete raw blob from `audio_blobs` (web) or filesystem (Android)
-- On API failure: hand off to `OfflineQueueService` with `chunk_ref` = `recordingId`
+**View interface** injected by the screen into the presenter:
+```js
+{
+  setAudioSource({ sourceKey, sourceLabel, canToggle }),
+  setRecording(bool),
+  setConnectionStatus('online' | 'offline-buffering'),
+  setBrowserSupported(bool),
+  setSessionCard({ startedAt, expiresAt } | null),
+  setCards(card[]),
+}
+```
+
+**Screen state** (useState):
+```js
+audioSource, recording, browserSupported, sessionCard, cards
+```
+
+**Layout** (top → bottom):
+1. `SafeAreaView`
+2. **Header row** (height 64): back arrow `←` | patient icon SVG + bed icon SVG + `"What do I know"` (centered flex:1) | spacer 48px
+3. **`AudioSourceBadge`** (centered, same as Dashboard, with `onPress → presenter.onToggleSource()`)
+4. **Patient identifier** `Text`: `"Bed X: 'Name'"` or `"Bed X"` if no name
+5. **`ScrollView`** (flex:1):
+   - `SessionActiveCard` (always shown if `sessionCard != null`)
+   - `InfoCard[]` for each card in `cards`
+   - Empty state `Text` if `cards.length === 0`
+6. **Bottom bar** (fixed, same layout as Dashboard): Speaker placeholder (left, disabled) | `PulsingMicButton` (center) | `MicInputIcon` + label (right)
+
+**`SessionActiveCard`** (not tappable):
+- Inline shield SVG, title `"Session Active"`, body `Started: HH:MM  /  Expires: HH:MM`
+- Background `#F5F5F5`, border radius 12
+
+**`InfoCard`** (tappable):
+```js
+// Props: type, hasData, flagged, confidence, preview, onPress
+```
+- Icon per type (inline SVG constants at top of file)
+- Preview text (1 line, ellipsis)
+- If `hasData && !flagged`: green eye SVG icon top-right
+- If `flagged`: orange/yellow background (`#FFFBEC`), warning SVG icon top-right
+- `TouchableOpacity` → `onPress`
+- Animated entry: `Animated.Value(0)` opacity + translateY `+12 → 0` on mount
+
+**`PulsingMicButton`**: copy from `DashboardScreen.js` (identical — do not abstract yet).
+
+**SVG icons needed** (inline constants): shield, clock, pill, bell, heart, warning-triangle, info-circle, eye, arrow-back, patient-with-bed.
+
+---
+
+### Step 3 — Update `DashboardPresenter.onBedPress` (F3)
+
+**File**: `src/presenters/DashboardPresenter.js`
+
+Add `sessionId` to the navigation params:
 
 ```js
-const TranscriptionService = {
-  async processChunk({ recordingId, filePath, sessionId, mimeType, timestampStart }) {
-    // 1. Build FormData (reuse logic from ChunkUploadService._buildFormData)
-    // 2. POST to /api/voice/transcribe-and-structure
-    // 3. On success: _persistSegment(), _deleteRawAudio(), _markRecordingTranscribed()
-    // 4. On failure: OfflineQueueService.enqueue({ recordingId, sessionId })
-  },
+async onBedPress(patient, navigation) {
+  this._activePatient = { id: patient.id, name: patient.name, bed: patient.bed };
+  this._view.setActivePatient(this._activePatient);
 
-  async _persistSegment(apiResponse, recordingId, sessionId) {
-    // expires_at = session.started_at + 14h
-    // store in 'transcription_segments'
-  },
-
-  async _deleteRawAudio(filePath) {
-    // Web: storage.delete('audio_blobs', blobId)
-    // Android: FileSystem.deleteAsync(filePath)
-  },
-};
+  const sessionId = await SessionService.getActiveSessionId();
+  try {
+    const storage = await getStorage();
+    const segments = sessionId
+      ? await storage.queryBySession('transcription_segments', sessionId)
+      : [];
+    navigation.navigate('BedDetails', { patient, segments, sessionId }); // ← add sessionId
+  } catch (e) {
+    console.error('[DashboardPresenter] onBedPress nav error:', e);
+    navigation.navigate('BedDetails', { patient, segments: [], sessionId: null });
+  }
+}
 ```
 
 ---
 
-### Step 3 — Update `ChunkUploadService.js` → delegate to `TranscriptionService`
-
-**File: `src/services/audio/ChunkUploadService.js`** (and `src/services/ChunkUploadService.js`)
-
-- Replace the `upload()` body to call `TranscriptionService.processChunk()` instead of hitting `/voice/transcribe` directly.
-- This keeps the existing callers (`WebRecorderService`, `ContinuousRecordingService`) unchanged.
-
----
-
-### Step 4 — Wire TTL calculation
-
-**File: `src/services/TranscriptionService.js`**
-
-- On `_persistSegment`, fetch the active session to read `started_at`:
-  ```js
-  const session = await SessionService.getActiveSession();
-  const expiresAt = new Date(new Date(session.started_at).getTime() + 14 * 60 * 60 * 1000).toISOString();
-  ```
-- Pass `expires_at` explicitly when calling `storage.create('transcription_segments', { ..., expires_at })`.
-
----
-
-### Step 5 — Startup data restore
-
-**File: `src/presenters/DashboardPresenter.js`**
-
-- In `mount()`, after loading beds, call a new `_loadTranscriptionSegments()` method that reads `transcription_segments` for the active session and passes them to `this._view.setTranscriptionSegments(segments)`.
-- The view interface already supports arbitrary state setters — add `setTranscriptionSegments` for downstream US11/US14 consumption.
-
----
-
-### Step 6 — TTL cleanup on launch
-
-**File: `src/repositories/adapters/dexie/DexieAdapter.ts`** & **`SqliteAdapter.ts`**
-
-- `purgeExpired()` already iterates all stores — adding `transcription_segments` to the loop in Step 1 is sufficient.
-- Confirm `purgeExpired()` is called on app launch (verify in `StorageFactory` / app init path).
-
----
-
-### Step 7 — Tests
+### Step 4 — Tests (F4)
 
 | File | What to test |
 |---|---|
-| `src/__tests__/services/TranscriptionService.test.js` | processChunk success → segment persisted, blob deleted; processChunk failure → enqueued in OfflineQueueService |
-| `src/__tests__/integration/transcription.integration.test.js` | Full flow: fake chunk → API mock → segment in Dexie → purgeExpired removes expired segment |
-| Update `ChunkUploadService.test.js` | Verify it delegates to TranscriptionService |
+| `src/__tests__/presenters/PatientDetailsPresenter.test.js` | `buildCards`: segments with medications → card present; empty segments → empty array; `flagged=false` default; session card falls back to `started_at + 14h` when `expires_at` is null |
+| `src/__tests__/screens/BedDetailScreen.test.js` | Renders `"What do I know"` title; `SessionActiveCard` visible; empty state message when `cards=[]`; `InfoCard` shows eye icon when `hasData=true && flagged=false`; flagged card has orange bg |
 
 ---
 
 ## File Checklist
 
-| Action | File |
-|---|---|
-| MODIFY | `src/repositories/adapters/dexie/DexieAdapter.ts` |
-| MODIFY | `src/repositories/adapters/sqlite/migrations.ts` |
-| CREATE | `src/services/TranscriptionService.js` |
-| MODIFY | `src/services/audio/ChunkUploadService.js` |
-| MODIFY | `src/services/ChunkUploadService.js` |
-| MODIFY | `src/presenters/DashboardPresenter.js` |
-| CREATE | `src/__tests__/services/TranscriptionService.test.js` |
-| CREATE | `src/__tests__/integration/transcription.integration.test.js` |
+| Action | File | Status |
+|---|---|---|
+| CREATE | `src/presenters/PatientDetailsPresenter.js` | ✓ Done |
+| REPLACE | `src/screens/BedDetailScreen.js` | Next |
+| MODIFY | `src/presenters/DashboardPresenter.js` | — |
+| CREATE | `src/__tests__/presenters/PatientDetailsPresenter.test.js` | — |
+| CREATE | `src/__tests__/screens/BedDetailScreen.test.js` | — |
 
 ---
 
 ## Out of Scope
 
-- No UI changes (US6 is a background service; UI lives in US11/US14)
-- No changes to the API server
-- `ContinuousRecordingService` (Android path) already calls `ChunkUploadService.upload()` — no changes needed there after Step 3
+- `ActivityDetailScreen` — US11 (tap Recent Activity card → clinical narrative)
+- `CorrectionScreen` — US19 (tap flagged card → edit AI values)
+- Dedicated tables (`medications`, `vital_signs`, `allergies`, `safety_info`) — US22 (Tatiana)
+- `flagged` cards being triggered — US22 sets `flagged=true` based on `confidence`; US10 only wires the UI for it
+- Medications sorted by next due time — no `next_due` field until US22

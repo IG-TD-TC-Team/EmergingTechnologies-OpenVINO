@@ -506,7 +506,7 @@ function DashboardScreen({ navigation, route }) {
       <View style={styles.bottomBar}>
         <View style={styles.barItem}>
           <MicInputIcon sourceKey={audioSource.sourceKey} />
-          <Text style={styles.barLabel}>{audioSource.sourceLabel}</Text>
+          <Text style={styles.barLabel} numberOfLines={1}>{audioSource.sourceLabel}</Text>
         </View>
 
           <PulsingMicButton
@@ -724,7 +724,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     backgroundColor: '#FFFFFF',
   },
-  barItem: { alignItems: 'center', gap: 4 },
+  barItem: { flex: 1, alignItems: 'center', gap: 4 },
   barItemDisabled: { opacity: 0.4 },
   barLabel: { fontSize: 10, color: '#5F5E5A' },
   barLabelDisabled: { color: '#B4B2A9' },

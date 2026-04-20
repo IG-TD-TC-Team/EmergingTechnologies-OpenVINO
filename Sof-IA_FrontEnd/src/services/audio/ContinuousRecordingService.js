@@ -30,6 +30,7 @@ const ContinuousRecordingService = {
   // ─── Internal state ───────────────────────────────────────────────────────
   _isRecording: false,
   _sessionId: null,
+  _patientId: null,
   _chunkIndex: 0,
   _chunkTimer: null,
   _strategy: null,
@@ -68,6 +69,7 @@ const ContinuousRecordingService = {
           // Emit immediately for <200ms UI restore
           this._isRecording = true;
           this._sessionId = saved.sessionId;
+          this._patientId = saved.patientId ?? null;
           this._chunkIndex = saved.chunkIndex ?? 0;
           this._emit(true, 'online');
           // Resume the chunk loop
@@ -92,19 +94,20 @@ const ContinuousRecordingService = {
    * Toggle recording ON or OFF.
    * Called from DashboardPresenter.onMicPress().
    */
-  async toggleRecording(sessionId) {
+  async toggleRecording(sessionId, patientId = null) {
     if (this._isRecording) {
       await this._stopRecording();
     } else {
-      await this._startRecording(sessionId);
+      await this._startRecording(sessionId, patientId);
     }
   },
 
   // ─── Start ────────────────────────────────────────────────────────────────
 
-  async _startRecording(sessionId) {
+  async _startRecording(sessionId, patientId = null) {
     try {
       this._sessionId = sessionId;
+      this._patientId = patientId;
       this._chunkIndex = 0;
       this._gapEvents = [{ type: 'start', timestamp: new Date().toISOString() }];
 
@@ -229,7 +232,7 @@ const ContinuousRecordingService = {
     // Create AudioRecording record
     const recording = await storage.create('audio_recordings', {
       session_id: this._sessionId,
-      patient_id: null,
+      patient_id: this._patientId,
       status: 'stopped',
       audio_source: isWeb ? 'device_mic' : 'device_mic',
       file_path: uri,
@@ -262,6 +265,7 @@ const ContinuousRecordingService = {
       filePath: uri,
       sessionId: this._sessionId,
       mimeType,
+      patientId: this._patientId,
     });
   },
 
@@ -274,6 +278,7 @@ const ContinuousRecordingService = {
         JSON.stringify({
           isRecording: true,
           sessionId: this._sessionId,
+          patientId: this._patientId,
           chunkIndex: this._chunkIndex,
           startedAt: new Date().toISOString(),
         })

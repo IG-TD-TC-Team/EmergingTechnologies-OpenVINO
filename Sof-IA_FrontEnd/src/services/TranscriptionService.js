@@ -35,7 +35,7 @@ const TranscriptionService = {
    * @param {string} params.mimeType       — 'audio/webm' | 'audio/mp4'
    * @param {number} params.timestampStart — recording start time in ms
    */
-  async processChunk({ recordingId, filePath, sessionId, mimeType, timestampStart }) {
+  async processChunk({ recordingId, filePath, sessionId, mimeType, patientId = null, timestampStart }) {
     try {
       const session = await SessionService.getActiveShift();
       const nurseId = session?.nurse_name ?? 'unknown';
@@ -53,7 +53,7 @@ const TranscriptionService = {
 
       const data = await response.json();
 
-      await this._persistSegment(data, recordingId, sessionId, session);
+      await this._persistSegment(data, recordingId, sessionId, session, patientId);
       await this._markRecordingTranscribed(recordingId);
       await this._deleteRawAudio(filePath);
 
@@ -95,7 +95,7 @@ const TranscriptionService = {
     return record.blob;
   },
 
-  async _persistSegment(apiResponse, recordingId, sessionId, session) {
+  async _persistSegment(apiResponse, recordingId, sessionId, session, patientId = null) {
     const storage = await getStorage();
 
     // TTL = session start + 14h (not the default 30-day fallback in DexieAdapter.create)
@@ -116,7 +116,7 @@ const TranscriptionService = {
       confidence: apiResponse.confidence ?? null,
       ts_start: apiResponse.timestamp_start ?? null,
       ts_end: apiResponse.timestamp_end ?? null,
-      bed_id: null,
+      bed_id: patientId,
       expires_at: expiresAt,
     });
   },

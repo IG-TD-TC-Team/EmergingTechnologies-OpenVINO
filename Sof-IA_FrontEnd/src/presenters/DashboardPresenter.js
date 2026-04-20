@@ -131,21 +131,22 @@ export default class DashboardPresenter {
             return;
         }
 
-        try {
-            await ContinuousRecordingService.toggleRecording(sessionId);
-        } catch (err) {
-            console.error('[DashboardPresenter] Failed to toggle recording:', err);
-            return;
-        }
-
-        // US21: no bed selected → auto-create one and make it active
-        if (!this._activePatient) {
+        // Ensure an active patient exists before recording starts so bed_id is always set.
+        // Auto-create only when starting (not stopping) and no bed is selected.
+        if (!this._activePatient && !ContinuousRecordingService.isRecording()) {
             const patient = await this._autoCreatePatient();
             if (patient) {
                 this._activePatient = { id: patient.id, name: patient.name, bed: patient.bed };
                 this._view.setActivePatient(this._activePatient);
                 await this._loadBeds();
             }
+        }
+
+        try {
+            await ContinuousRecordingService.toggleRecording(sessionId, this._activePatient?.id ?? null);
+        } catch (err) {
+            console.error('[DashboardPresenter] Failed to toggle recording:', err);
+            return;
         }
     }
 
@@ -266,16 +267,16 @@ export default class DashboardPresenter {
         this._activePatient = { id: patient.id, name: patient.name, bed: patient.bed };
         this._view.setActivePatient(this._activePatient);
 
+        const sessionId = await SessionService.getActiveSessionId();
         try {
             const storage = await getStorage();
-            const sessionId = await SessionService.getActiveSessionId();
             const segments = sessionId
                 ? await storage.queryBySession('transcription_segments', sessionId)
                 : [];
-            navigation.navigate('BedDetails', { patient, segments });
+            navigation.navigate('BedDetails', { patient, segments, sessionId });
         } catch (e) {
             console.error('[DashboardPresenter] onBedPress nav error:', e);
-            navigation.navigate('BedDetails', { patient, segments: [] });
+            navigation.navigate('BedDetails', { patient, segments: [], sessionId: null });
         }
     }
 

@@ -172,6 +172,7 @@ const OfflineQueueService = {
       filePath: recording.file_path,
       sessionId: recording.session_id,
       mimeType: recording.format_mime_type,
+      patientId: recording.patient_id ?? null,
       timestampStart: recording.started_at ? new Date(recording.started_at).getTime() : Date.now(),
     });
 

@@ -135,7 +135,7 @@ export default class PatientDetailsPresenter {
 
 export function buildCards(segments, patient) {
     // Filter to this patient's bed; segments with no bed_id are treated as unassigned (included)
-    const owned = segments.filter((s) => s.bed_id === patient.id);
+    const owned = segments.filter((s) => s.bed_id === null || s.bed_id === patient.id);
 
     const parsed = owned.map((s) => {
         let structured = null;

@@ -114,7 +114,7 @@ describe('buildCards', () => {
         expect(cards.find((c) => c.type === 'recent_activity')).toBeTruthy();
     });
 
-    it('builds recent_activity preview with activity_type and language', () => {
+    it('builds recent_activity preview with activity_type when present', () => {
         const seg = makeSegment({
             ts_start: new Date('2026-04-20T08:30:00Z').getTime(),
             language: 'fr',
@@ -122,8 +122,19 @@ describe('buildCards', () => {
         });
         const cards = buildCards([seg], makePatient());
         const card = cards.find((c) => c.type === 'recent_activity');
+        // activity_type takes precedence over language in the preview (uses ??)
         expect(card.preview).toContain('Pain assessment');
-        expect(card.preview).toContain('fr');
+    });
+
+    it('builds recent_activity preview with language when no activity_type', () => {
+        const seg = makeSegment({
+            ts_start: new Date('2026-04-20T08:30:00Z').getTime(),
+            language: 'fr',
+            structured_json: JSON.stringify({ activity_type: null, medications: null, vitals: null, actions: null }),
+        });
+        const cards = buildCards([seg], makePatient());
+        const card = cards.find((c) => c.type === 'recent_activity');
+        expect(card.preview).toContain('Language: fr');
     });
 
     it('builds medications card and deduplicates across segments', () => {
@@ -229,6 +240,81 @@ describe('_loadSessionCard', () => {
         const p = new PatientDetailsPresenter(view);
         await p._loadSessionCard();
         expect(view.setSessionCard).toHaveBeenCalledWith(null);
+    });
+});
+
+// ─── onMicPress — patient context flows into the voice pipeline ───────────────
+
+describe('onMicPress', () => {
+    beforeEach(async () => {
+        // Clear call history so not.toHaveBeenCalled() is scoped to the current test
+        jest.clearAllMocks();
+        SessionService.getActiveShift.mockResolvedValue(null);
+        SessionService.getActiveSessionId.mockResolvedValue(null);
+        const storage = await getStorage();
+        storage.queryBySession.mockResolvedValue([]);
+    });
+
+    it('calls toggleRecording with sessionId and patient.id', async () => {
+        SessionService.getActiveSessionId.mockResolvedValue('session-abc');
+
+        const patient = makePatient({ id: 'p-1' });
+        const view = makeView();
+        const p = new PatientDetailsPresenter(view);
+        // mount() sets this._patient so onMicPress has the context
+        await p.mount({ patient, sessionId: 'session-abc' });
+
+        await p.onMicPress();
+
+        expect(ContinuousRecordingService.toggleRecording).toHaveBeenCalledWith(
+            'session-abc',
+            'p-1'
+        );
+    });
+
+    it('passes null patientId when patient has no id', async () => {
+        SessionService.getActiveSessionId.mockResolvedValue('session-abc');
+
+        const patient = makePatient({ id: null });
+        const view = makeView();
+        const p = new PatientDetailsPresenter(view);
+        await p.mount({ patient, sessionId: 'session-abc' });
+
+        await p.onMicPress();
+
+        expect(ContinuousRecordingService.toggleRecording).toHaveBeenCalledWith(
+            'session-abc',
+            null
+        );
+    });
+
+    it('does not call toggleRecording when there is no active session', async () => {
+        SessionService.getActiveSessionId.mockResolvedValue(null);
+
+        const view = makeView();
+        const p = new PatientDetailsPresenter(view);
+        await p.mount({ patient: makePatient(), sessionId: null });
+
+        await p.onMicPress();
+
+        expect(ContinuousRecordingService.toggleRecording).not.toHaveBeenCalled();
+    });
+
+    it('passes the patient.id from mount — not a stale value from a previous screen', async () => {
+        SessionService.getActiveSessionId.mockResolvedValue('session-xyz');
+
+        // Simulate a fresh mount for a specific patient (Bed 4 — Dave)
+        const patient = makePatient({ id: 'p-dave', bed: '4', name: 'Dave' });
+        const view = makeView();
+        const p = new PatientDetailsPresenter(view);
+        await p.mount({ patient, sessionId: 'session-xyz' });
+
+        await p.onMicPress();
+
+        // The recording must be tagged with Dave's id, not a default or null
+        const [calledSessionId, calledPatientId] = ContinuousRecordingService.toggleRecording.mock.calls[0];
+        expect(calledSessionId).toBe('session-xyz');
+        expect(calledPatientId).toBe('p-dave');
     });
 });
 

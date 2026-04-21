@@ -74,11 +74,16 @@ const closeSvg = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" xm
 
 function BedCard({ bed, name, onPress, isActive }) {
     return (
-        <TouchableOpacity
-            style={[styles.bedCard, isActive && styles.bedCardActive]}
+        <Pressable
+            style={({ pressed }) => [
+                styles.bedCard,
+                isActive && styles.bedCardActive,
+                pressed && styles.bedCardPressed,
+            ]}
             onPress={onPress}
-            activeOpacity={0.7}
+            accessibilityRole="button"
             accessibilityLabel={`Bed ${bed}: ${name || 'unnamed'}${isActive ? ', active' : ''}`}
+            accessibilityHint="Opens patient details"
             accessibilityState={{ selected: isActive }}
         >
             <SvgXml xml={isActive ? bedActiveSvg : bedSvg} width={43} height={43} />
@@ -90,8 +95,8 @@ function BedCard({ bed, name, onPress, isActive }) {
                     {`Bed ${bed}${name ? `: "${name}"` : ''}`}
                 </Text>
             </View>
-        </TouchableOpacity>
-  );
+        </Pressable>
+    );
 }
 
 // --- Pulsing mic button ---
@@ -659,6 +664,11 @@ const styles = StyleSheet.create({
     // US21 — active bed highlight
     bedCardActive: {
         opacity: 1,
+    },
+    bedCardPressed: {
+        backgroundColor: '#E8F7F2',
+        borderRadius: 8,
+        opacity: 0.85,
     },
   bedChip: {
     borderWidth: 1,

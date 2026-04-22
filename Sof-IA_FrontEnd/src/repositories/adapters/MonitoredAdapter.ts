@@ -190,6 +190,12 @@ export class MonitoredAdapter implements IRepository {
     );
   }
 
+  async queryBySessionAndBed<T>(store: string, sessionId: string, bedId: string): Promise<T[]> {
+    return this.executeWithMonitoring(`queryBySessionAndBed:${store}`, () =>
+      this.adapter.queryBySessionAndBed(store, sessionId, bedId)
+    );
+  }
+
   async bulkDelete(store: string, where: WhereClause): Promise<number> {
     return this.executeWithMonitoring(`bulkDelete:${store}`, () =>
       this.adapter.bulkDelete(store, where)

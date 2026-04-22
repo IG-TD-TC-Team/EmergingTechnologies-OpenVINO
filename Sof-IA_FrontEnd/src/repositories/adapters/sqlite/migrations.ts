@@ -267,6 +267,82 @@ export const migrations: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_transcription_segments_expires_at ON transcription_segments(expires_at);
     `,
   },
+  {
+    version: 5,
+    name: 'add_card_stores',
+    up: `
+      -- Medications card store (US22)
+      CREATE TABLE IF NOT EXISTS medications (
+        id TEXT PRIMARY KEY NOT NULL,
+        session_id TEXT NOT NULL,
+        bed_id TEXT NOT NULL,
+        medication_name TEXT NOT NULL,
+        dose TEXT NOT NULL,
+        frequency TEXT NOT NULL,
+        next_due TEXT NOT NULL,
+        administered_at TEXT,
+        flagged INTEGER NOT NULL DEFAULT 0,
+        confidence REAL,
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_medications_session_bed ON medications(session_id, bed_id);
+      CREATE INDEX IF NOT EXISTS idx_medications_expires_at ON medications(expires_at);
+
+      -- Vital Signs card store (US22)
+      CREATE TABLE IF NOT EXISTS vital_signs (
+        id TEXT PRIMARY KEY NOT NULL,
+        session_id TEXT NOT NULL,
+        bed_id TEXT NOT NULL,
+        blood_pressure TEXT,
+        heart_rate REAL,
+        temperature REAL,
+        spo2 REAL,
+        timestamp TEXT NOT NULL,
+        flagged INTEGER NOT NULL DEFAULT 0,
+        confidence REAL,
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_vital_signs_session_bed ON vital_signs(session_id, bed_id);
+      CREATE INDEX IF NOT EXISTS idx_vital_signs_expires_at ON vital_signs(expires_at);
+
+      -- Allergies card store (US22)
+      CREATE TABLE IF NOT EXISTS allergies (
+        id TEXT PRIMARY KEY NOT NULL,
+        session_id TEXT NOT NULL,
+        bed_id TEXT NOT NULL,
+        allergen TEXT NOT NULL,
+        reaction_type TEXT NOT NULL,
+        severity TEXT NOT NULL,
+        flagged INTEGER NOT NULL DEFAULT 0,
+        confidence REAL,
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_allergies_session_bed ON allergies(session_id, bed_id);
+      CREATE INDEX IF NOT EXISTS idx_allergies_expires_at ON allergies(expires_at);
+
+      -- Safety Info card store (US22)
+      CREATE TABLE IF NOT EXISTS safety_info (
+        id TEXT PRIMARY KEY NOT NULL,
+        session_id TEXT NOT NULL,
+        bed_id TEXT NOT NULL,
+        safety_flag TEXT NOT NULL,
+        description TEXT NOT NULL,
+        flagged INTEGER NOT NULL DEFAULT 0,
+        confidence REAL,
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_safety_info_session_bed ON safety_info(session_id, bed_id);
+      CREATE INDEX IF NOT EXISTS idx_safety_info_expires_at ON safety_info(expires_at);
+    `,
+  },
 ];
 
 /**

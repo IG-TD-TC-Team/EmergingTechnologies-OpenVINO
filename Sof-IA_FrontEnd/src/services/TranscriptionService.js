@@ -7,6 +7,67 @@
  * On API failure the chunk is handed to OfflineQueueService for retry.
  *
  * TTL for stored segments = session.started_at + 14 hours (not the default 30 days).
+ *
+ * ─── API Response Contract ─────────────────────────────────────────────────────
+ *
+ * The backend returns a JSON object with the following shape.
+ * All card-data lives under `structured`; top-level fields are metadata.
+ *
+ * {
+ *   transcript:       string,          // raw transcription text
+ *   language:         string,          // e.g. "fr"
+ *   confidence:       number,          // 0–1
+ *   timestamp_start:  number,          // epoch ms
+ *   timestamp_end:    number,          // epoch ms
+ *
+ *   structured: {
+ *     // ── Identity ──────────────────────────────────────────────────────────
+ *     patient_name:  string | null,
+ *     room:          string | null,
+ *     activity_type: string | null,    // e.g. "assessment", "medication"
+ *     actions:       string[] | null,
+ *
+ *     // ── Medications card ──────────────────────────────────────────────────
+ *     medications: Array<{
+ *       medication_name: string,       // e.g. "Paracetamol"
+ *       dose:            string,       // e.g. "1g"
+ *       frequency:       string,       // e.g. "every 6h"
+ *       next_due:        string,       // ISO-8601 datetime
+ *       administered_at: string | null // ISO-8601 datetime or null
+ *     }> | null,
+ *
+ *     // ── Vital Signs card ──────────────────────────────────────────────────
+ *     vital_signs: {
+ *       blood_pressure: string | null, // e.g. "120/80"
+ *       heart_rate:     number | null, // bpm
+ *       temperature:    number | null, // °C
+ *       spo2:           number | null, // %
+ *       timestamp:      string         // ISO-8601 datetime of measurement
+ *     } | null,
+ *
+ *     // ── Allergies card ────────────────────────────────────────────────────
+ *     allergies: Array<{
+ *       allergen:      string,         // e.g. "Penicillin"
+ *       reaction_type: string,         // e.g. "anaphylaxis"
+ *       severity:      string          // "mild" | "moderate" | "severe"
+ *     }> | null,
+ *
+ *     // ── Safety Info card ──────────────────────────────────────────────────
+ *     safety_info: Array<{
+ *       safety_flag:  string,          // e.g. "fall_risk"
+ *       description:  string           // human-readable explanation
+ *     }> | null
+ *   }
+ * }
+ *
+ * The `structured` object is stored verbatim as structured_json (JSON string)
+ * in the transcription_segments table.  Downstream card repositories read
+ * that field and fan out into their own stores (medications, vital_signs,
+ * allergies, safety_info).
+ *
+ * See src/__tests__/helpers/transcription-fixture.ts for the canonical fixture
+ * used across all unit and integration tests.
+ * ──────────────────────────────────────────────────────────────────────────────
  */
 
 import * as FileSystem from 'expo-file-system';

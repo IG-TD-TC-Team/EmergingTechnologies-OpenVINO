@@ -289,7 +289,7 @@ export function buildCards(segments, medications, vitalSigns, allergies, safetyI
     if (allergies.length > 0) {
         const flagged = allergies.some((a) => {
             const s = (a.severity ?? '').toLowerCase();
-            return s === 'critical' || s === 'high';
+            return s === 'severe' || s === 'critical' || s === 'high';
         });
         const names = [...new Set(allergies.map((a) => a.allergen))];
         cards.push(card({

@@ -1,20 +1,19 @@
 /**
- * PatientDetailsPresenter — US10
+ * PatientDetailsPresenter — US10 / US22
  *
  * Tests:
  *   buildCards — empty inputs → empty array
- *   buildCards — recent activity built from latest segment
- *   buildCards — vitals from most recent segment that has vitals
- *   buildCards — medications from structured card rows (not segments)
- *   buildCards — medications: deduplicates by name, keeps newest entry
- *   buildCards — medications: sorted ascending by next_due
- *   buildCards — medications: preview format "Name — due HH:MM"
- *   buildCards — allergies + notes come from patient record
- *   buildCards — flagged defaults to false, confidence defaults to 1.0
- *   _loadSessionCard — uses expires_at from session when present
- *   _loadSessionCard — falls back to started_at + 14h when expires_at is null
- *   onCardPress — calls console.log (stub, not navigation)
- *   unmount — clears poll interval and unsubscribes recording
+ *   buildCards — recent activity from latest segment (transcript / activity_type)
+ *   buildCards — medications from card table rows (dedup, sort, preview format)
+ *   buildCards — vital signs from card table rows (latest by timestamp, named fields)
+ *   buildCards — allergies from card table rows (flagged on severe/critical/high)
+ *   buildCards — safety info from card table rows (always flagged)
+ *   buildCards — fallback to patient.allergies / patient.notes when tables empty
+ *   buildCards — fixture-data compatibility (MEDICATIONS_FIXTURE, VITAL_SIGNS_FIXTURE, …)
+ *   _loadSessionCard — expires_at used / computed from started_at + 14h
+ *   onCardPress — routes to CardDetail (non-flagged) or CardCorrection (flagged)
+ *   onMicPress  — toggleRecording with patient context
+ *   unmount     — clears poll interval and unsubscribes recording
  */
 
 // ─── React Native mock ────────────────────────────────────────────────────────
@@ -68,6 +67,13 @@ jest.mock('../../repositories', () => ({
 import PatientDetailsPresenter, { buildCards } from '../../presenters/PatientDetailsPresenter';
 import SessionService from '../../services/SessionService';
 import { getStorage } from '../../repositories';
+import {
+    MEDICATIONS_FIXTURE,
+    VITAL_SIGNS_FIXTURE,
+    ALLERGIES_FIXTURE,
+    SAFETY_INFO_FIXTURE,
+    STRUCTURED_FIXTURE,
+} from '../helpers/transcription-fixture';
 
 // The global jest.setup.js mock is a plain object (no default wrapper), so we require it directly
 const ContinuousRecordingService = require('../../services/audio/ContinuousRecordingService');
@@ -342,7 +348,7 @@ describe('buildCards', () => {
 
     it('builds allergies card from allergy table rows', () => {
         const allergy = makeAllergyRow();
-        const cards = buildCards([], [], [], [allergy], makePatient());
+        const cards = buildCards([], [], [], [allergy], [], makePatient());
         const card = cards.find((c) => c.type === 'allergies');
         expect(card).toBeTruthy();
         expect(card.hasData).toBe(true);
@@ -353,7 +359,7 @@ describe('buildCards', () => {
             makeAllergyRow({ allergen: 'Penicillin', severity: 'severe' }),
             makeAllergyRow({ allergen: 'Latex',      severity: 'mild' }),
         ];
-        const cards = buildCards([], [], [], rows, makePatient());
+        const cards = buildCards([], [], [], rows, [], makePatient());
         const card = cards.find((c) => c.type === 'allergies');
         expect(card.preview).toBe('Penicillin, Latex');
     });
@@ -363,7 +369,7 @@ describe('buildCards', () => {
             makeAllergyRow({ allergen: 'Penicillin' }),
             makeAllergyRow({ allergen: 'Penicillin' }),
         ];
-        const cards = buildCards([], [], [], rows, makePatient());
+        const cards = buildCards([], [], [], rows, [], makePatient());
         const card = cards.find((c) => c.type === 'allergies');
         expect(card.preview).toBe('Penicillin');
     });
@@ -373,14 +379,23 @@ describe('buildCards', () => {
             makeAllergyRow({ allergen: 'Penicillin', severity: 'Critical' }),
             makeAllergyRow({ allergen: 'Latex',      severity: 'mild' }),
         ];
-        const cards = buildCards([], [], [], rows, makePatient());
+        const cards = buildCards([], [], [], rows, [], makePatient());
         const card = cards.find((c) => c.type === 'allergies');
         expect(card.flagged).toBe(true);
     });
 
     it('allergies: flagged=true when any row has severity "High"', () => {
         const rows = [makeAllergyRow({ allergen: 'Aspirin', severity: 'High' })];
-        const cards = buildCards([], [], [], rows, makePatient());
+        const cards = buildCards([], [], [], rows, [], makePatient());
+        const card = cards.find((c) => c.type === 'allergies');
+        expect(card.flagged).toBe(true);
+    });
+
+    it('allergies: flagged=true when severity is "severe" — the backend contract value', () => {
+        // Backend enum is mild | moderate | severe. "severe" must flag the card so that
+        // ALLERGIES_FIXTURE (Penicillin — severity: 'severe') produces a flagged card end-to-end.
+        const rows = [makeAllergyRow({ allergen: 'Penicillin', severity: 'severe' })];
+        const cards = buildCards([], [], [], rows, [], makePatient());
         const card = cards.find((c) => c.type === 'allergies');
         expect(card.flagged).toBe(true);
     });
@@ -390,7 +405,7 @@ describe('buildCards', () => {
             makeAllergyRow({ allergen: 'Latex',   severity: 'mild' }),
             makeAllergyRow({ allergen: 'Aspirin', severity: 'moderate' }),
         ];
-        const cards = buildCards([], [], [], rows, makePatient());
+        const cards = buildCards([], [], [], rows, [], makePatient());
         const card = cards.find((c) => c.type === 'allergies');
         expect(card.flagged).toBe(false);
     });
@@ -404,7 +419,7 @@ describe('buildCards', () => {
 
     it('allergies: does not use patient.allergies fallback when table has rows', () => {
         const rows = [makeAllergyRow({ allergen: 'Aspirin' })];
-        const cards = buildCards([], [], [], rows, makePatient({ allergies: 'Should not appear' }));
+        const cards = buildCards([], [], [], rows, [], makePatient({ allergies: 'Should not appear' }));
         const card = cards.find((c) => c.type === 'allergies');
         expect(card.preview).not.toContain('Should not appear');
         expect(card.preview).toContain('Aspirin');
@@ -430,7 +445,7 @@ describe('buildCards', () => {
             makeSafetyRow({ safety_flag: 'fall_risk' }),
             makeSafetyRow({ safety_flag: 'isolation' }),
         ];
-        const cards = buildCards([], [], [], [], rows, makePatient());
+        const cards = buildCards([], [], [], [], rows, [], makePatient());
         const card = cards.find((c) => c.type === 'safety_info');
         expect(card.preview).toBe('fall_risk, isolation');
     });
@@ -440,7 +455,7 @@ describe('buildCards', () => {
             makeSafetyRow({ safety_flag: 'fall_risk' }),
             makeSafetyRow({ safety_flag: 'fall_risk' }),
         ];
-        const cards = buildCards([], [], [], [], rows, makePatient());
+        const cards = buildCards([], [], [], [], rows, [], makePatient());
         const card = cards.find((c) => c.type === 'safety_info');
         expect(card.preview).toBe('fall_risk');
     });
@@ -462,7 +477,7 @@ describe('buildCards', () => {
 
     it('safety_info: does not use patient.notes fallback when table has rows', () => {
         const rows = [makeSafetyRow({ safety_flag: 'isolation' })];
-        const cards = buildCards([], [], [], [], rows, makePatient({ notes: 'Should not appear' }));
+        const cards = buildCards([], [], [], [], rows, [], makePatient({ notes: 'Should not appear' }));
         const card = cards.find((c) => c.type === 'safety_info');
         expect(card.preview).not.toContain('Should not appear');
         expect(card.preview).toContain('isolation');
@@ -471,6 +486,65 @@ describe('buildCards', () => {
     it('safety_info: no card when table is empty and patient has no notes', () => {
         const cards = buildCards([], [], [], [], [], makePatient({ notes: null }));
         expect(cards.find((c) => c.type === 'safety_info')).toBeUndefined();
+    });
+
+    // ── Fixture compatibility ─────────────────────────────────────────────────────
+    // Verifies that the DB row shapes written by TranscriptionService._fanOutCardData
+    // (which map 1-to-1 from the fixture) are accepted and rendered correctly by buildCards.
+
+    it('fixture: MEDICATIONS_FIXTURE entries map to a medications card with both drugs', () => {
+        const rows = MEDICATIONS_FIXTURE.map((m) => ({
+            ...m, session_id: 'session-abc', bed_id: 'p-1', flagged: false, confidence: 0.94,
+        }));
+        const cards = buildCards([], rows, [], [], [], makePatient());
+        const card = cards.find((c) => c.type === 'medications');
+        expect(card.items.length).toBe(2);
+        expect(card.items[0].medication_name).toBe('Paracetamol');
+        expect(card.items[1].medication_name).toBe('Metformin');
+    });
+
+    it('fixture: VITAL_SIGNS_FIXTURE fields are preserved in the card data property', () => {
+        const row = { ...VITAL_SIGNS_FIXTURE, session_id: 'session-abc', bed_id: 'p-1', flagged: false, confidence: 0.91 };
+        const cards = buildCards([], [], [row], [], [], makePatient());
+        const card = cards.find((c) => c.type === 'vital_signs');
+        expect(card.data).toMatchObject({
+            blood_pressure: VITAL_SIGNS_FIXTURE.blood_pressure,
+            heart_rate:     VITAL_SIGNS_FIXTURE.heart_rate,
+            temperature:    VITAL_SIGNS_FIXTURE.temperature,
+            spo2:           VITAL_SIGNS_FIXTURE.spo2,
+        });
+    });
+
+    it('fixture: ALLERGIES_FIXTURE Penicillin (severe) triggers flagged=true on the card', () => {
+        const rows = ALLERGIES_FIXTURE.map((a) => ({
+            ...a, session_id: 'session-abc', bed_id: 'p-1', flagged: false, confidence: 0.97,
+        }));
+        const cards = buildCards([], [], [], rows, [], makePatient());
+        const card = cards.find((c) => c.type === 'allergies');
+        expect(card.flagged).toBe(true);
+        expect(card.preview).toContain('Penicillin');
+        expect(card.preview).toContain('Latex');
+    });
+
+    it('fixture: SAFETY_INFO_FIXTURE rows produce a flagged card listing all flags', () => {
+        const rows = SAFETY_INFO_FIXTURE.map((s) => ({
+            ...s, session_id: 'session-abc', bed_id: 'p-1', flagged: false, confidence: 0.89,
+        }));
+        const cards = buildCards([], [], [], [], rows, makePatient());
+        const card = cards.find((c) => c.type === 'safety_info');
+        expect(card.flagged).toBe(true);
+        expect(card.preview).toContain('fall_risk');
+        expect(card.preview).toContain('nil_by_mouth');
+    });
+
+    it('fixture: STRUCTURED_FIXTURE segment produces recent_activity and next_reminder cards', () => {
+        const seg = makeSegment({
+            structured_json: JSON.stringify(STRUCTURED_FIXTURE),
+            ts_start: new Date('2026-04-19T09:00:00Z').getTime(),
+        });
+        const cards = buildCards([seg], [], [], [], [], makePatient());
+        expect(cards.find((c) => c.type === 'recent_activity')).toBeTruthy();
+        expect(cards.find((c) => c.type === 'next_reminder')).toBeTruthy();
     });
 
     it('non-safety cards default flagged=false and confidence=1.0', () => {

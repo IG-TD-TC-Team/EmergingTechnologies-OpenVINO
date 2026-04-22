@@ -315,6 +315,21 @@ describe('TranscriptionService', () => {
             });
         });
 
+        it('writes the second medications entry (Metformin) with correct fields', async () => {
+            mockFetchOk();
+            await TranscriptionService.processChunk(BED_CHUNK);
+
+            const medicationCalls = mockStorage.create.mock.calls.filter(c => c[0] === 'medications');
+            expect(medicationCalls[1][1]).toMatchObject({
+                session_id:      BED_CHUNK.sessionId,
+                bed_id:          'bed-3',
+                medication_name: 'Metformin',
+                dose:            '500mg',
+                frequency:       'twice daily',
+                flagged:         false,
+            });
+        });
+
         it('writes one vital_signs row per response', async () => {
             mockFetchOk();
             await TranscriptionService.processChunk(BED_CHUNK);
@@ -349,6 +364,21 @@ describe('TranscriptionService', () => {
             });
         });
 
+        it('writes the second allergies entry (Latex) with correct fields', async () => {
+            mockFetchOk();
+            await TranscriptionService.processChunk(BED_CHUNK);
+
+            const allergyCalls = mockStorage.create.mock.calls.filter(c => c[0] === 'allergies');
+            expect(allergyCalls[1][1]).toMatchObject({
+                session_id:    BED_CHUNK.sessionId,
+                bed_id:        'bed-3',
+                allergen:      'Latex',
+                reaction_type: 'contact dermatitis',
+                severity:      'moderate',
+                flagged:       false,
+            });
+        });
+
         it('writes one safety_info row per API entry', async () => {
             mockFetchOk();
             await TranscriptionService.processChunk(BED_CHUNK);
@@ -360,6 +390,19 @@ describe('TranscriptionService', () => {
                 session_id:  BED_CHUNK.sessionId,
                 bed_id:      'bed-3',
                 safety_flag: 'fall_risk',
+                flagged:     false,
+            });
+        });
+
+        it('writes the second safety_info entry (nil_by_mouth) with correct fields', async () => {
+            mockFetchOk();
+            await TranscriptionService.processChunk(BED_CHUNK);
+
+            const safetyCalls = mockStorage.create.mock.calls.filter(c => c[0] === 'safety_info');
+            expect(safetyCalls[1][1]).toMatchObject({
+                session_id:  BED_CHUNK.sessionId,
+                bed_id:      'bed-3',
+                safety_flag: 'nil_by_mouth',
                 flagged:     false,
             });
         });

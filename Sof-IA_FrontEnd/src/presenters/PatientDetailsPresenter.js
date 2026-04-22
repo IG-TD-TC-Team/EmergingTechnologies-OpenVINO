@@ -140,11 +140,17 @@ export default class PatientDetailsPresenter {
         }
     }
 
-    // ─── Card navigation (stub — detail screens are US11/US19/US22) ──────────
+    // ─── Card navigation (US11 = CardDetail, US19 = CardCorrection) ─────────
 
-    onCardPress(card, _navigation) {
-        // TODO US11/US19/US22: navigate to Detail View or Edit/Correction screen
-        console.log('[PatientDetailsPresenter] card tapped:', card.type);
+    onCardPress(card, navigation) {
+        if (!card.hasData) return;
+        if (card.flagged) {
+            // Flagged → go straight to Correction screen (US19)
+            navigation.navigate('CardCorrection', { card, patient: this._patient });
+        } else {
+            // Non-flagged with data → read-only Detail View with Edit button (US11)
+            navigation.navigate('CardDetail', { card, patient: this._patient });
+        }
     }
 }
 

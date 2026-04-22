@@ -621,15 +621,42 @@ describe('onMicPress', () => {
 // ─── onCardPress ──────────────────────────────────────────────────────────────
 
 describe('onCardPress', () => {
-    it('logs the card type (stub — does not navigate)', () => {
-        const spy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    function makeNav() { return { navigate: jest.fn() }; }
+
+    it('navigates to CardDetail for a non-flagged card with data', () => {
         const p = new PatientDetailsPresenter(makeView());
-        p.onCardPress({ type: 'medications' }, { navigate: jest.fn() });
-        expect(spy).toHaveBeenCalledWith(
-            '[PatientDetailsPresenter] card tapped:',
-            'medications'
-        );
-        spy.mockRestore();
+        p._patient = makePatient();
+        const nav = makeNav();
+        const card = { type: 'medications', hasData: true, flagged: false };
+        p.onCardPress(card, nav);
+        expect(nav.navigate).toHaveBeenCalledWith('CardDetail', { card, patient: p._patient });
+    });
+
+    it('navigates to CardCorrection for a flagged card', () => {
+        const p = new PatientDetailsPresenter(makeView());
+        p._patient = makePatient();
+        const nav = makeNav();
+        const card = { type: 'safety_info', hasData: true, flagged: true };
+        p.onCardPress(card, nav);
+        expect(nav.navigate).toHaveBeenCalledWith('CardCorrection', { card, patient: p._patient });
+    });
+
+    it('does not navigate when card has no data', () => {
+        const p = new PatientDetailsPresenter(makeView());
+        p._patient = makePatient();
+        const nav = makeNav();
+        p.onCardPress({ type: 'medications', hasData: false, flagged: false }, nav);
+        expect(nav.navigate).not.toHaveBeenCalled();
+    });
+
+    it('passes the current patient to the navigation params', () => {
+        const patient = makePatient({ id: 'p-42', name: 'Bob' });
+        const p = new PatientDetailsPresenter(makeView());
+        p._patient = patient;
+        const nav = makeNav();
+        const card = { type: 'vital_signs', hasData: true, flagged: false };
+        p.onCardPress(card, nav);
+        expect(nav.navigate.mock.calls[0][1].patient).toBe(patient);
     });
 });
 

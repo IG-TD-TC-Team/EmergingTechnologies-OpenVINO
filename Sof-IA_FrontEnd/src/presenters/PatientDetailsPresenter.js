@@ -98,7 +98,7 @@ export default class PatientDetailsPresenter {
             const storage = await getStorage();
             const bedId = this._patient?.id ?? null;
 
-            const [allSegments, medications, vitalSigns, allergies] = await Promise.all([
+            const [allSegments, medications, vitalSigns, allergies, safetyInfo] = await Promise.all([
                 storage.queryBySession('transcription_segments', this._sessionId),
                 bedId
                     ? storage.queryBySessionAndBed('medications', this._sessionId, bedId)
@@ -109,9 +109,12 @@ export default class PatientDetailsPresenter {
                 bedId
                     ? storage.queryBySessionAndBed('allergies', this._sessionId, bedId)
                     : Promise.resolve([]),
+                bedId
+                    ? storage.queryBySessionAndBed('safety_info', this._sessionId, bedId)
+                    : Promise.resolve([]),
             ]);
 
-            const cards = buildCards(allSegments, medications, vitalSigns, allergies, this._patient);
+            const cards = buildCards(allSegments, medications, vitalSigns, allergies, safetyInfo, this._patient);
 
             // Only call setCards when something actually changed to avoid spurious re-renders
             const keys = JSON.stringify(cards.map((c) => `${c.type}:${c.preview}`));
@@ -157,9 +160,11 @@ export default class PatientDetailsPresenter {
  *                                 pre-scoped to (session_id, bed_id) by the caller
  * @param {object[]} allergies   - rows from the allergies card store,
  *                                 pre-scoped to (session_id, bed_id) by the caller
- * @param {object}   patient    - patient record (for notes / allergies fallback)
+ * @param {object[]} safetyInfo  - rows from the safety_info card store,
+ *                                 pre-scoped to (session_id, bed_id) by the caller
+ * @param {object}   patient    - patient record (for allergies / notes fallback)
  */
-export function buildCards(segments, medications, vitalSigns, allergies, patient) {
+export function buildCards(segments, medications, vitalSigns, allergies, safetyInfo, patient) {
     // Filter to this patient's bed; segments with no bed_id are treated as unassigned (included)
     const owned = segments.filter((s) => s.bed_id === null || s.bed_id === patient.id);
 
@@ -298,11 +303,22 @@ export function buildCards(segments, medications, vitalSigns, allergies, patient
         }));
     }
 
-    // 7 — Safety Information (from patient notes)
-    if (patient?.notes) {
+    // 7 — Safety Information (from dedicated card store; fall back to patient.notes for existing shifts)
+    // Safety cards are always flagged when present — they are always shown as red/orange per card spec.
+    if (safetyInfo.length > 0) {
+        const flags = [...new Set(safetyInfo.map((s) => s.safety_flag))];
         cards.push(card({
             type: 'safety_info',
             hasData: true,
+            flagged: true,
+            preview: flags.join(', '),
+            items: safetyInfo,
+        }));
+    } else if (patient?.notes) {
+        cards.push(card({
+            type: 'safety_info',
+            hasData: true,
+            flagged: true,
             preview: typeof patient.notes === 'string'
                 ? patient.notes
                 : JSON.stringify(patient.notes),

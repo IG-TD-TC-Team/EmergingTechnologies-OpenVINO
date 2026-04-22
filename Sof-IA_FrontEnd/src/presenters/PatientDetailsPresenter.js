@@ -96,8 +96,16 @@ export default class PatientDetailsPresenter {
             }
 
             const storage = await getStorage();
-            const allSegments = await storage.queryBySession('transcription_segments', this._sessionId);
-            const cards = buildCards(allSegments, this._patient);
+            const bedId = this._patient?.id ?? null;
+
+            const [allSegments, medications] = await Promise.all([
+                storage.queryBySession('transcription_segments', this._sessionId),
+                bedId
+                    ? storage.queryBySessionAndBed('medications', this._sessionId, bedId)
+                    : Promise.resolve([]),
+            ]);
+
+            const cards = buildCards(allSegments, medications, this._patient);
 
             // Only call setCards when something actually changed to avoid spurious re-renders
             const keys = JSON.stringify(cards.map((c) => `${c.type}:${c.preview}`));
@@ -133,7 +141,15 @@ export default class PatientDetailsPresenter {
 
 // ─── Pure helper — builds ordered card array ──────────────────────────────────
 
-export function buildCards(segments, patient) {
+/**
+ * Build the ordered card array for the patient details screen.
+ *
+ * @param {object[]} segments   - transcription_segments rows for this session
+ * @param {object[]} medications - rows from the medications card store,
+ *                                 pre-scoped to (session_id, bed_id) by the caller
+ * @param {object}   patient    - patient record (for allergies / notes fallback)
+ */
+export function buildCards(segments, medications, patient) {
     // Filter to this patient's bed; segments with no bed_id are treated as unassigned (included)
     const owned = segments.filter((s) => s.bed_id === null || s.bed_id === patient.id);
 
@@ -172,22 +188,33 @@ export function buildCards(segments, patient) {
         }));
     }
 
-    // 3 — Medications
-    const meds = [];
-    for (const s of byTime) {
-        const list = s.structured?.medications;
-        if (Array.isArray(list)) {
-            for (const m of list) {
-                if (m && !meds.includes(m)) meds.push(m);
-            }
+    // 3 — Medications (from dedicated card store — Task 2/3)
+    //
+    // medications rows are pre-scoped to (session_id, bed_id) and sorted newest-first
+    // by queryBySessionAndBed. We deduplicate by medication_name (keeping the most
+    // recently captured entry), then sort ascending by next_due for display.
+    if (medications.length > 0) {
+        // Deduplicate: first occurrence wins (rows arrive newest-first from the DB)
+        const seen = new Map();
+        for (const med of medications) {
+            if (!seen.has(med.medication_name)) seen.set(med.medication_name, med);
         }
-    }
-    if (meds.length > 0) {
+        // Sort ascending by next_due (ISO strings compare lexicographically)
+        const sorted = [...seen.values()].sort((a, b) =>
+            (a.next_due ?? '').localeCompare(b.next_due ?? '')
+        );
+        // Preview: "Paracetamol — due 14:30" or first two joined with ", "
+        const fmt = (med) => {
+            const time = med.next_due
+                ? new Date(med.next_due).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                : null;
+            return time ? `${med.medication_name} — due ${time}` : med.medication_name;
+        };
         cards.push(card({
             type: 'medications',
             hasData: true,
-            preview: meds.slice(0, 3).join(', ') + (meds.length > 3 ? ` +${meds.length - 3} more` : ''),
-            items: meds,
+            preview: sorted.slice(0, 2).map(fmt).join(', '),
+            items: sorted,
         }));
     }
 

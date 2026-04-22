@@ -2,11 +2,13 @@
  * PatientDetailsPresenter — US10
  *
  * Tests:
- *   buildCards — segments with medications → card present
- *   buildCards — empty segments → empty array
+ *   buildCards — empty inputs → empty array
  *   buildCards — recent activity built from latest segment
  *   buildCards — vitals from most recent segment that has vitals
- *   buildCards — deduplicates medications across segments
+ *   buildCards — medications from structured card rows (not segments)
+ *   buildCards — medications: deduplicates by name, keeps newest entry
+ *   buildCards — medications: sorted ascending by next_due
+ *   buildCards — medications: preview format "Name — due HH:MM"
  *   buildCards — allergies + notes come from patient record
  *   buildCards — flagged defaults to false, confidence defaults to 1.0
  *   _loadSessionCard — uses expires_at from session when present
@@ -56,7 +58,8 @@ jest.mock('../../services/SessionService', () => ({
 
 jest.mock('../../repositories', () => ({
     getStorage: jest.fn().mockResolvedValue({
-        queryBySession: jest.fn().mockResolvedValue([]),
+        queryBySession:        jest.fn().mockResolvedValue([]),
+        queryBySessionAndBed:  jest.fn().mockResolvedValue([]),
     }),
 }));
 
@@ -100,17 +103,34 @@ function makePatient(overrides = {}) {
     return { id: 'p-1', bed: '1', name: 'Alice', allergies: null, notes: null, ...overrides };
 }
 
+// ─── Medication row factory ────────────────────────────────────────────────────
+
+function makeMedRow(overrides = {}) {
+    return {
+        medication_name: 'Paracetamol',
+        dose:            '1g',
+        frequency:       'every 6h',
+        next_due:        '2026-04-19T14:30:00.000Z',
+        administered_at: null,
+        session_id:      'session-abc',
+        bed_id:          'p-1',
+        flagged:         false,
+        confidence:      0.94,
+        ...overrides,
+    };
+}
+
 // ─── buildCards (pure function) ───────────────────────────────────────────────
 
 describe('buildCards', () => {
-    it('returns empty array when no segments and no patient data', () => {
-        const cards = buildCards([], makePatient());
+    it('returns empty array when no segments, no medications, and no patient data', () => {
+        const cards = buildCards([], [], makePatient());
         expect(cards).toEqual([]);
     });
 
     it('builds recent_activity card from segment with transcript', () => {
         const seg = makeSegment({ transcript: 'Checked vitals', structured_json: null });
-        const cards = buildCards([seg], makePatient());
+        const cards = buildCards([seg], [], makePatient());
         expect(cards.find((c) => c.type === 'recent_activity')).toBeTruthy();
     });
 
@@ -120,9 +140,8 @@ describe('buildCards', () => {
             language: 'fr',
             structured_json: JSON.stringify({ activity_type: 'Pain assessment', medications: null, vitals: null, actions: null }),
         });
-        const cards = buildCards([seg], makePatient());
+        const cards = buildCards([seg], [], makePatient());
         const card = cards.find((c) => c.type === 'recent_activity');
-        // activity_type takes precedence over language in the preview (uses ??)
         expect(card.preview).toContain('Pain assessment');
     });
 
@@ -132,24 +151,84 @@ describe('buildCards', () => {
             language: 'fr',
             structured_json: JSON.stringify({ activity_type: null, medications: null, vitals: null, actions: null }),
         });
-        const cards = buildCards([seg], makePatient());
+        const cards = buildCards([seg], [], makePatient());
         const card = cards.find((c) => c.type === 'recent_activity');
         expect(card.preview).toContain('Language: fr');
     });
 
-    it('builds medications card and deduplicates across segments', () => {
-        const seg1 = makeSegment({ id: 's1', structured_json: JSON.stringify({ medications: ['Paracetamol', 'Ibuprofen'] }) });
-        const seg2 = makeSegment({ id: 's2', structured_json: JSON.stringify({ medications: ['Ibuprofen', 'Morphine'] }) });
-        const cards = buildCards([seg1, seg2], makePatient());
-        const med = cards.find((c) => c.type === 'medications');
-        expect(med).toBeTruthy();
-        expect(med.items).toEqual(['Paracetamol', 'Ibuprofen', 'Morphine']);
+    // ── Medications ─────────────────────────────────────────────────────────────
+
+    it('builds medications card from structured medication rows', () => {
+        const med = makeMedRow();
+        const cards = buildCards([], [med], makePatient());
+        const medCard = cards.find((c) => c.type === 'medications');
+        expect(medCard).toBeTruthy();
+        expect(medCard.hasData).toBe(true);
     });
+
+    it('medications: deduplicates by medication_name, keeping newest (first) entry', () => {
+        // rows arrive newest-first from queryBySessionAndBed
+        const newest = makeMedRow({ medication_name: 'Paracetamol', next_due: '2026-04-19T20:30:00.000Z' });
+        const older  = makeMedRow({ medication_name: 'Paracetamol', next_due: '2026-04-19T14:30:00.000Z' });
+        const cards = buildCards([], [newest, older], makePatient());
+        const medCard = cards.find((c) => c.type === 'medications');
+        expect(medCard.items.length).toBe(1);
+        // newest entry is kept
+        expect(medCard.items[0].next_due).toBe('2026-04-19T20:30:00.000Z');
+    });
+
+    it('medications: sorted ascending by next_due after deduplication', () => {
+        const later   = makeMedRow({ medication_name: 'Metformin',    next_due: '2026-04-19T20:00:00.000Z' });
+        const earlier = makeMedRow({ medication_name: 'Paracetamol',  next_due: '2026-04-19T14:30:00.000Z' });
+        const cards = buildCards([], [later, earlier], makePatient());
+        const medCard = cards.find((c) => c.type === 'medications');
+        expect(medCard.items[0].medication_name).toBe('Paracetamol');
+        expect(medCard.items[1].medication_name).toBe('Metformin');
+    });
+
+    it('medications: preview contains "Name — due HH:MM" for the first item', () => {
+        const med = makeMedRow({ medication_name: 'Paracetamol', next_due: '2026-04-19T14:30:00.000Z' });
+        const cards = buildCards([], [med], makePatient());
+        const medCard = cards.find((c) => c.type === 'medications');
+        expect(medCard.preview).toMatch(/Paracetamol — due \d{1,2}:\d{2}/);
+    });
+
+    it('medications: preview joins first two items with ", " when multiple', () => {
+        const med1 = makeMedRow({ medication_name: 'Paracetamol', next_due: '2026-04-19T14:30:00.000Z' });
+        const med2 = makeMedRow({ medication_name: 'Metformin',   next_due: '2026-04-19T20:00:00.000Z' });
+        const med3 = makeMedRow({ medication_name: 'Ibuprofen',   next_due: '2026-04-19T22:00:00.000Z' });
+        const cards = buildCards([], [med1, med2, med3], makePatient());
+        const medCard = cards.find((c) => c.type === 'medications');
+        // Only the first 2 appear in the preview string
+        expect(medCard.preview).toContain('Paracetamol');
+        expect(medCard.preview).toContain('Metformin');
+        expect(medCard.preview).not.toContain('Ibuprofen');
+    });
+
+    it('medications: no card when medications array is empty', () => {
+        const cards = buildCards([], [], makePatient());
+        expect(cards.find((c) => c.type === 'medications')).toBeUndefined();
+    });
+
+    it('medications: items are structured objects with all card fields', () => {
+        const med = makeMedRow();
+        const cards = buildCards([], [med], makePatient());
+        const medCard = cards.find((c) => c.type === 'medications');
+        const item = medCard.items[0];
+        expect(item).toMatchObject({
+            medication_name: 'Paracetamol',
+            dose:            '1g',
+            frequency:       'every 6h',
+            next_due:        '2026-04-19T14:30:00.000Z',
+        });
+    });
+
+    // ── Other cards ─────────────────────────────────────────────────────────────
 
     it('builds vital_signs card from latest segment with vitals', () => {
         const older = makeSegment({ id: 's1', ts_start: 1000, structured_json: JSON.stringify({ vitals: { hr: 70 } }) });
         const newer = makeSegment({ id: 's2', ts_start: 2000, structured_json: JSON.stringify({ vitals: { hr: 80, bp: '120/80' } }) });
-        const cards = buildCards([older, newer], makePatient());
+        const cards = buildCards([older, newer], [], makePatient());
         const card = cards.find((c) => c.type === 'vital_signs');
         expect(card).toBeTruthy();
         expect(card.data).toEqual({ hr: 80, bp: '120/80' });
@@ -157,29 +236,30 @@ describe('buildCards', () => {
 
     it('builds next_reminder card from actions', () => {
         const seg = makeSegment({ structured_json: JSON.stringify({ actions: ['Administer medication', 'Update chart'] }) });
-        const cards = buildCards([seg], makePatient());
+        const cards = buildCards([seg], [], makePatient());
         const card = cards.find((c) => c.type === 'next_reminder');
         expect(card).toBeTruthy();
         expect(card.preview).toBe('Administer medication');
     });
 
     it('builds allergies card from patient.allergies', () => {
-        const cards = buildCards([], makePatient({ allergies: 'Penicillin, Latex' }));
+        const cards = buildCards([], [], makePatient({ allergies: 'Penicillin, Latex' }));
         const card = cards.find((c) => c.type === 'allergies');
         expect(card).toBeTruthy();
         expect(card.preview).toBe('Penicillin, Latex');
     });
 
     it('builds safety_info card from patient.notes', () => {
-        const cards = buildCards([], makePatient({ notes: 'Fall risk' }));
+        const cards = buildCards([], [], makePatient({ notes: 'Fall risk' }));
         const card = cards.find((c) => c.type === 'safety_info');
         expect(card).toBeTruthy();
         expect(card.preview).toBe('Fall risk');
     });
 
     it('all cards default flagged=false and confidence=1.0', () => {
-        const seg = makeSegment({ structured_json: JSON.stringify({ medications: ['Aspirin'] }) });
-        const cards = buildCards([seg], makePatient({ allergies: 'Pollen' }));
+        const med = makeMedRow({ medication_name: 'Aspirin', next_due: '2026-04-19T14:00:00.000Z' });
+        const seg = makeSegment({ transcript: 'Stable' });
+        const cards = buildCards([seg], [med], makePatient({ allergies: 'Pollen' }));
         for (const card of cards) {
             expect(card.flagged).toBe(false);
             expect(card.confidence).toBe(1.0);
@@ -188,19 +268,20 @@ describe('buildCards', () => {
 
     it('skips segments with malformed structured_json without throwing', () => {
         const seg = makeSegment({ structured_json: '{bad json}' });
-        expect(() => buildCards([seg], makePatient())).not.toThrow();
+        expect(() => buildCards([seg], [], makePatient())).not.toThrow();
     });
 
-    it('filters out segments whose bed_id does not match patient.id', () => {
-        const seg = makeSegment({ bed_id: 'other-patient', structured_json: JSON.stringify({ medications: ['X'] }) });
-        const cards = buildCards([seg], makePatient({ id: 'p-1' }));
-        expect(cards.find((c) => c.type === 'medications')).toBeUndefined();
+    it('filters out segments whose bed_id does not match patient.id (recent_activity only from owned beds)', () => {
+        const seg = makeSegment({ bed_id: 'other-patient', transcript: 'Some activity' });
+        const cards = buildCards([seg], [], makePatient({ id: 'p-1' }));
+        // Segment belongs to a different bed — no recent_activity card for this patient
+        expect(cards.find((c) => c.type === 'recent_activity')).toBeUndefined();
     });
 
-    it('includes segments with null bed_id regardless of patient', () => {
-        const seg = makeSegment({ bed_id: null, structured_json: JSON.stringify({ medications: ['X'] }) });
-        const cards = buildCards([seg], makePatient({ id: 'p-1' }));
-        expect(cards.find((c) => c.type === 'medications')).toBeTruthy();
+    it('includes segments with null bed_id in recent_activity (unassigned segments)', () => {
+        const seg = makeSegment({ bed_id: null, transcript: 'Unassigned observation' });
+        const cards = buildCards([seg], [], makePatient({ id: 'p-1' }));
+        expect(cards.find((c) => c.type === 'recent_activity')).toBeTruthy();
     });
 });
 
@@ -253,6 +334,7 @@ describe('onMicPress', () => {
         SessionService.getActiveSessionId.mockResolvedValue(null);
         const storage = await getStorage();
         storage.queryBySession.mockResolvedValue([]);
+        storage.queryBySessionAndBed.mockResolvedValue([]);
     });
 
     it('calls toggleRecording with sessionId and patient.id', async () => {
@@ -345,6 +427,7 @@ describe('unmount', () => {
 
         const storage = await getStorage();
         storage.queryBySession.mockResolvedValue([]);
+        storage.queryBySessionAndBed.mockResolvedValue([]);
 
         const view = makeView();
         const p = new PatientDetailsPresenter(view);

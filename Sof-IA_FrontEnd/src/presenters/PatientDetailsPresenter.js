@@ -98,14 +98,17 @@ export default class PatientDetailsPresenter {
             const storage = await getStorage();
             const bedId = this._patient?.id ?? null;
 
-            const [allSegments, medications] = await Promise.all([
+            const [allSegments, medications, vitalSigns] = await Promise.all([
                 storage.queryBySession('transcription_segments', this._sessionId),
                 bedId
                     ? storage.queryBySessionAndBed('medications', this._sessionId, bedId)
                     : Promise.resolve([]),
+                bedId
+                    ? storage.queryBySessionAndBed('vital_signs', this._sessionId, bedId)
+                    : Promise.resolve([]),
             ]);
 
-            const cards = buildCards(allSegments, medications, this._patient);
+            const cards = buildCards(allSegments, medications, vitalSigns, this._patient);
 
             // Only call setCards when something actually changed to avoid spurious re-renders
             const keys = JSON.stringify(cards.map((c) => `${c.type}:${c.preview}`));
@@ -147,9 +150,11 @@ export default class PatientDetailsPresenter {
  * @param {object[]} segments   - transcription_segments rows for this session
  * @param {object[]} medications - rows from the medications card store,
  *                                 pre-scoped to (session_id, bed_id) by the caller
+ * @param {object[]} vitalSigns  - rows from the vital_signs card store,
+ *                                 pre-scoped to (session_id, bed_id) by the caller
  * @param {object}   patient    - patient record (for allergies / notes fallback)
  */
-export function buildCards(segments, medications, patient) {
+export function buildCards(segments, medications, vitalSigns, patient) {
     // Filter to this patient's bed; segments with no bed_id are treated as unassigned (included)
     const owned = segments.filter((s) => s.bed_id === null || s.bed_id === patient.id);
 
@@ -237,19 +242,30 @@ export function buildCards(segments, medications, patient) {
         }));
     }
 
-    // 5 — Vital Signs (latest segment that has vitals)
-    const vitalsSegment = [...byTime].reverse().find((s) => s.structured?.vitals);
-    if (vitalsSegment) {
-        const v = vitalsSegment.structured.vitals;
-        const parts = Object.entries(v)
-            .filter(([, val]) => val != null)
-            .map(([key, val]) => `${key}: ${val}`)
-            .slice(0, 3);
+    // 5 — Vital Signs (from dedicated card store — Task 2/3)
+    //
+    // vitalSigns rows are pre-scoped to (session_id, bed_id). Take the row with
+    // the latest measurement timestamp. Build preview from named spec fields,
+    // omitting any that are null.  Format: "BP 120/80 — HR 72 — 09:15".
+    if (vitalSigns.length > 0) {
+        const latest = vitalSigns.reduce((best, row) =>
+            (row.timestamp ?? '') > (best.timestamp ?? '') ? row : best
+        );
+        const parts = [];
+        if (latest.blood_pressure != null) parts.push(`BP ${latest.blood_pressure}`);
+        if (latest.heart_rate     != null) parts.push(`HR ${latest.heart_rate}`);
+        if (latest.temperature    != null) parts.push(`T ${latest.temperature}°C`);
+        if (latest.spo2           != null) parts.push(`SpO2 ${latest.spo2}%`);
+        if (latest.timestamp) {
+            parts.push(
+                new Date(latest.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            );
+        }
         cards.push(card({
             type: 'vital_signs',
             hasData: true,
-            preview: parts.join('  ·  '),
-            data: v,
+            preview: parts.join(' — '),
+            data: latest,
         }));
     }
 

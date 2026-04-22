@@ -98,7 +98,7 @@ export default class PatientDetailsPresenter {
             const storage = await getStorage();
             const bedId = this._patient?.id ?? null;
 
-            const [allSegments, medications, vitalSigns] = await Promise.all([
+            const [allSegments, medications, vitalSigns, allergies] = await Promise.all([
                 storage.queryBySession('transcription_segments', this._sessionId),
                 bedId
                     ? storage.queryBySessionAndBed('medications', this._sessionId, bedId)
@@ -106,9 +106,12 @@ export default class PatientDetailsPresenter {
                 bedId
                     ? storage.queryBySessionAndBed('vital_signs', this._sessionId, bedId)
                     : Promise.resolve([]),
+                bedId
+                    ? storage.queryBySessionAndBed('allergies', this._sessionId, bedId)
+                    : Promise.resolve([]),
             ]);
 
-            const cards = buildCards(allSegments, medications, vitalSigns, this._patient);
+            const cards = buildCards(allSegments, medications, vitalSigns, allergies, this._patient);
 
             // Only call setCards when something actually changed to avoid spurious re-renders
             const keys = JSON.stringify(cards.map((c) => `${c.type}:${c.preview}`));
@@ -152,9 +155,11 @@ export default class PatientDetailsPresenter {
  *                                 pre-scoped to (session_id, bed_id) by the caller
  * @param {object[]} vitalSigns  - rows from the vital_signs card store,
  *                                 pre-scoped to (session_id, bed_id) by the caller
- * @param {object}   patient    - patient record (for allergies / notes fallback)
+ * @param {object[]} allergies   - rows from the allergies card store,
+ *                                 pre-scoped to (session_id, bed_id) by the caller
+ * @param {object}   patient    - patient record (for notes / allergies fallback)
  */
-export function buildCards(segments, medications, vitalSigns, patient) {
+export function buildCards(segments, medications, vitalSigns, allergies, patient) {
     // Filter to this patient's bed; segments with no bed_id are treated as unassigned (included)
     const owned = segments.filter((s) => s.bed_id === null || s.bed_id === patient.id);
 
@@ -269,8 +274,21 @@ export function buildCards(segments, medications, vitalSigns, patient) {
         }));
     }
 
-    // 6 — Allergies (from patient record)
-    if (patient?.allergies) {
+    // 6 — Allergies (from dedicated card store; fall back to patient.allergies for existing shifts)
+    if (allergies.length > 0) {
+        const flagged = allergies.some((a) => {
+            const s = (a.severity ?? '').toLowerCase();
+            return s === 'critical' || s === 'high';
+        });
+        const names = [...new Set(allergies.map((a) => a.allergen))];
+        cards.push(card({
+            type: 'allergies',
+            hasData: true,
+            flagged,
+            preview: names.join(', '),
+            items: allergies,
+        }));
+    } else if (patient?.allergies) {
         cards.push(card({
             type: 'allergies',
             hasData: true,

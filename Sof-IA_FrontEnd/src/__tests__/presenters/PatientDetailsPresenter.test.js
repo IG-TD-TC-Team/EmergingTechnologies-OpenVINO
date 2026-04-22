@@ -120,6 +120,19 @@ function makeVitalRow(overrides = {}) {
     };
 }
 
+function makeAllergyRow(overrides = {}) {
+    return {
+        allergen:      'Penicillin',
+        reaction_type: 'anaphylaxis',
+        severity:      'severe',
+        session_id:    'session-abc',
+        bed_id:        'p-1',
+        flagged:       false,
+        confidence:    0.97,
+        ...overrides,
+    };
+}
+
 function makeMedRow(overrides = {}) {
     return {
         medication_name: 'Paracetamol',
@@ -139,13 +152,13 @@ function makeMedRow(overrides = {}) {
 
 describe('buildCards', () => {
     it('returns empty array when no segments, no medications, no vitals, and no patient data', () => {
-        const cards = buildCards([], [], [], makePatient());
+        const cards = buildCards([], [], [], [], makePatient());
         expect(cards).toEqual([]);
     });
 
     it('builds recent_activity card from segment with transcript', () => {
         const seg = makeSegment({ transcript: 'Checked vitals', structured_json: null });
-        const cards = buildCards([seg], [], [], makePatient());
+        const cards = buildCards([seg], [], [], [], makePatient());
         expect(cards.find((c) => c.type === 'recent_activity')).toBeTruthy();
     });
 
@@ -155,7 +168,7 @@ describe('buildCards', () => {
             language: 'fr',
             structured_json: JSON.stringify({ activity_type: 'Pain assessment', medications: null, vitals: null, actions: null }),
         });
-        const cards = buildCards([seg], [], [], makePatient());
+        const cards = buildCards([seg], [], [], [], makePatient());
         const card = cards.find((c) => c.type === 'recent_activity');
         expect(card.preview).toContain('Pain assessment');
     });
@@ -166,7 +179,7 @@ describe('buildCards', () => {
             language: 'fr',
             structured_json: JSON.stringify({ activity_type: null, medications: null, vitals: null, actions: null }),
         });
-        const cards = buildCards([seg], [], [], makePatient());
+        const cards = buildCards([seg], [], [], [], makePatient());
         const card = cards.find((c) => c.type === 'recent_activity');
         expect(card.preview).toContain('Language: fr');
     });
@@ -175,7 +188,7 @@ describe('buildCards', () => {
 
     it('builds medications card from structured medication rows', () => {
         const med = makeMedRow();
-        const cards = buildCards([], [med], [], makePatient());
+        const cards = buildCards([], [med], [], [], makePatient());
         const medCard = cards.find((c) => c.type === 'medications');
         expect(medCard).toBeTruthy();
         expect(medCard.hasData).toBe(true);
@@ -184,7 +197,7 @@ describe('buildCards', () => {
     it('medications: deduplicates by medication_name, keeping newest (first) entry', () => {
         const newest = makeMedRow({ medication_name: 'Paracetamol', next_due: '2026-04-19T20:30:00.000Z' });
         const older  = makeMedRow({ medication_name: 'Paracetamol', next_due: '2026-04-19T14:30:00.000Z' });
-        const cards = buildCards([], [newest, older], [], makePatient());
+        const cards = buildCards([], [newest, older], [], [], makePatient());
         const medCard = cards.find((c) => c.type === 'medications');
         expect(medCard.items.length).toBe(1);
         expect(medCard.items[0].next_due).toBe('2026-04-19T20:30:00.000Z');
@@ -193,7 +206,7 @@ describe('buildCards', () => {
     it('medications: sorted ascending by next_due after deduplication', () => {
         const later   = makeMedRow({ medication_name: 'Metformin',   next_due: '2026-04-19T20:00:00.000Z' });
         const earlier = makeMedRow({ medication_name: 'Paracetamol', next_due: '2026-04-19T14:30:00.000Z' });
-        const cards = buildCards([], [later, earlier], [], makePatient());
+        const cards = buildCards([], [later, earlier], [], [], makePatient());
         const medCard = cards.find((c) => c.type === 'medications');
         expect(medCard.items[0].medication_name).toBe('Paracetamol');
         expect(medCard.items[1].medication_name).toBe('Metformin');
@@ -201,7 +214,7 @@ describe('buildCards', () => {
 
     it('medications: preview contains "Name — due HH:MM" for the first item', () => {
         const med = makeMedRow({ medication_name: 'Paracetamol', next_due: '2026-04-19T14:30:00.000Z' });
-        const cards = buildCards([], [med], [], makePatient());
+        const cards = buildCards([], [med], [], [], makePatient());
         const medCard = cards.find((c) => c.type === 'medications');
         expect(medCard.preview).toMatch(/Paracetamol — due \d{1,2}:\d{2}/);
     });
@@ -210,7 +223,7 @@ describe('buildCards', () => {
         const med1 = makeMedRow({ medication_name: 'Paracetamol', next_due: '2026-04-19T14:30:00.000Z' });
         const med2 = makeMedRow({ medication_name: 'Metformin',   next_due: '2026-04-19T20:00:00.000Z' });
         const med3 = makeMedRow({ medication_name: 'Ibuprofen',   next_due: '2026-04-19T22:00:00.000Z' });
-        const cards = buildCards([], [med1, med2, med3], [], makePatient());
+        const cards = buildCards([], [med1, med2, med3], [], [], makePatient());
         const medCard = cards.find((c) => c.type === 'medications');
         expect(medCard.preview).toContain('Paracetamol');
         expect(medCard.preview).toContain('Metformin');
@@ -218,13 +231,13 @@ describe('buildCards', () => {
     });
 
     it('medications: no card when medications array is empty', () => {
-        const cards = buildCards([], [], [], makePatient());
+        const cards = buildCards([], [], [], [], makePatient());
         expect(cards.find((c) => c.type === 'medications')).toBeUndefined();
     });
 
     it('medications: items are structured objects with all card fields', () => {
         const med = makeMedRow();
-        const cards = buildCards([], [med], [], makePatient());
+        const cards = buildCards([], [med], [], [], makePatient());
         const medCard = cards.find((c) => c.type === 'medications');
         expect(medCard.items[0]).toMatchObject({
             medication_name: 'Paracetamol',
@@ -238,7 +251,7 @@ describe('buildCards', () => {
 
     it('builds vital_signs card from structured vital signs rows', () => {
         const vital = makeVitalRow();
-        const cards = buildCards([], [], [vital], makePatient());
+        const cards = buildCards([], [], [vital], [], makePatient());
         const vsCard = cards.find((c) => c.type === 'vital_signs');
         expect(vsCard).toBeTruthy();
         expect(vsCard.hasData).toBe(true);
@@ -247,7 +260,7 @@ describe('buildCards', () => {
     it('vital_signs: takes the row with the latest timestamp field', () => {
         const older  = makeVitalRow({ heart_rate: 70, timestamp: '2026-04-19T08:00:00.000Z' });
         const latest = makeVitalRow({ heart_rate: 80, timestamp: '2026-04-19T09:15:00.000Z' });
-        const cards = buildCards([], [], [older, latest], makePatient());
+        const cards = buildCards([], [], [older, latest], [], makePatient());
         const vsCard = cards.find((c) => c.type === 'vital_signs');
         expect(vsCard.data.heart_rate).toBe(80);
     });
@@ -260,14 +273,14 @@ describe('buildCards', () => {
             spo2:           null,
             timestamp:      '2026-04-19T09:15:00.000Z',
         });
-        const cards = buildCards([], [], [vital], makePatient());
+        const cards = buildCards([], [], [vital], [], makePatient());
         const vsCard = cards.find((c) => c.type === 'vital_signs');
         expect(vsCard.preview).toMatch(/^BP 120\/80 — HR 72 — \d{1,2}:\d{2}$/);
     });
 
     it('vital_signs: temperature and spo2 included when non-null', () => {
         const vital = makeVitalRow({ temperature: 37.2, spo2: 98 });
-        const cards = buildCards([], [], [vital], makePatient());
+        const cards = buildCards([], [], [vital], [], makePatient());
         const vsCard = cards.find((c) => c.type === 'vital_signs');
         expect(vsCard.preview).toContain('T 37.2°C');
         expect(vsCard.preview).toContain('SpO2 98%');
@@ -280,7 +293,7 @@ describe('buildCards', () => {
             temperature:    null,
             spo2:           null,
         });
-        const cards = buildCards([], [], [vital], makePatient());
+        const cards = buildCards([], [], [vital], [], makePatient());
         const vsCard = cards.find((c) => c.type === 'vital_signs');
         expect(vsCard.preview).not.toContain('BP');
         expect(vsCard.preview).toContain('HR 72');
@@ -288,7 +301,7 @@ describe('buildCards', () => {
 
     it('vital_signs: data property is the full latest row', () => {
         const vital = makeVitalRow();
-        const cards = buildCards([], [], [vital], makePatient());
+        const cards = buildCards([], [], [vital], [], makePatient());
         const vsCard = cards.find((c) => c.type === 'vital_signs');
         expect(vsCard.data).toMatchObject({
             blood_pressure: '120/80',
@@ -299,7 +312,7 @@ describe('buildCards', () => {
     });
 
     it('vital_signs: no card when vitalSigns array is empty', () => {
-        const cards = buildCards([], [], [], makePatient());
+        const cards = buildCards([], [], [], [], makePatient());
         expect(cards.find((c) => c.type === 'vital_signs')).toBeUndefined();
     });
 
@@ -307,21 +320,91 @@ describe('buildCards', () => {
 
     it('builds next_reminder card from actions', () => {
         const seg = makeSegment({ structured_json: JSON.stringify({ actions: ['Administer medication', 'Update chart'] }) });
-        const cards = buildCards([seg], [], [], makePatient());
+        const cards = buildCards([seg], [], [], [], makePatient());
         const card = cards.find((c) => c.type === 'next_reminder');
         expect(card).toBeTruthy();
         expect(card.preview).toBe('Administer medication');
     });
 
-    it('builds allergies card from patient.allergies', () => {
-        const cards = buildCards([], [], [], makePatient({ allergies: 'Penicillin, Latex' }));
+    // ── Allergies ────────────────────────────────────────────────────────────────
+
+    it('builds allergies card from allergy table rows', () => {
+        const allergy = makeAllergyRow();
+        const cards = buildCards([], [], [], [allergy], makePatient());
+        const card = cards.find((c) => c.type === 'allergies');
+        expect(card).toBeTruthy();
+        expect(card.hasData).toBe(true);
+    });
+
+    it('allergies: preview aggregates allergen names', () => {
+        const rows = [
+            makeAllergyRow({ allergen: 'Penicillin', severity: 'severe' }),
+            makeAllergyRow({ allergen: 'Latex',      severity: 'mild' }),
+        ];
+        const cards = buildCards([], [], [], rows, makePatient());
+        const card = cards.find((c) => c.type === 'allergies');
+        expect(card.preview).toBe('Penicillin, Latex');
+    });
+
+    it('allergies: deduplicates allergen names in preview', () => {
+        const rows = [
+            makeAllergyRow({ allergen: 'Penicillin' }),
+            makeAllergyRow({ allergen: 'Penicillin' }),
+        ];
+        const cards = buildCards([], [], [], rows, makePatient());
+        const card = cards.find((c) => c.type === 'allergies');
+        expect(card.preview).toBe('Penicillin');
+    });
+
+    it('allergies: flagged=true when any row has severity "Critical"', () => {
+        const rows = [
+            makeAllergyRow({ allergen: 'Penicillin', severity: 'Critical' }),
+            makeAllergyRow({ allergen: 'Latex',      severity: 'mild' }),
+        ];
+        const cards = buildCards([], [], [], rows, makePatient());
+        const card = cards.find((c) => c.type === 'allergies');
+        expect(card.flagged).toBe(true);
+    });
+
+    it('allergies: flagged=true when any row has severity "High"', () => {
+        const rows = [makeAllergyRow({ allergen: 'Aspirin', severity: 'High' })];
+        const cards = buildCards([], [], [], rows, makePatient());
+        const card = cards.find((c) => c.type === 'allergies');
+        expect(card.flagged).toBe(true);
+    });
+
+    it('allergies: flagged=false when no row has high severity', () => {
+        const rows = [
+            makeAllergyRow({ allergen: 'Latex',   severity: 'mild' }),
+            makeAllergyRow({ allergen: 'Aspirin', severity: 'moderate' }),
+        ];
+        const cards = buildCards([], [], [], rows, makePatient());
+        const card = cards.find((c) => c.type === 'allergies');
+        expect(card.flagged).toBe(false);
+    });
+
+    it('allergies: falls back to patient.allergies when table is empty', () => {
+        const cards = buildCards([], [], [], [], makePatient({ allergies: 'Penicillin, Latex' }));
         const card = cards.find((c) => c.type === 'allergies');
         expect(card).toBeTruthy();
         expect(card.preview).toBe('Penicillin, Latex');
     });
 
+    it('allergies: does not use patient.allergies fallback when table has rows', () => {
+        const rows = [makeAllergyRow({ allergen: 'Aspirin' })];
+        const cards = buildCards([], [], [], rows, makePatient({ allergies: 'Should not appear' }));
+        const card = cards.find((c) => c.type === 'allergies');
+        expect(card.preview).not.toContain('Should not appear');
+        expect(card.preview).toContain('Aspirin');
+    });
+
+    it('allergies: no card when table is empty and patient has no allergies', () => {
+        const cards = buildCards([], [], [], [], makePatient({ allergies: null }));
+        expect(cards.find((c) => c.type === 'allergies')).toBeUndefined();
+    });
+
     it('builds safety_info card from patient.notes', () => {
-        const cards = buildCards([], [], [], makePatient({ notes: 'Fall risk' }));
+        const cards = buildCards([], [], [], [], makePatient({ notes: 'Fall risk' }));
         const card = cards.find((c) => c.type === 'safety_info');
         expect(card).toBeTruthy();
         expect(card.preview).toBe('Fall risk');
@@ -331,7 +414,7 @@ describe('buildCards', () => {
         const med   = makeMedRow({ medication_name: 'Aspirin', next_due: '2026-04-19T14:00:00.000Z' });
         const vital = makeVitalRow();
         const seg   = makeSegment({ transcript: 'Stable' });
-        const cards = buildCards([seg], [med], [vital], makePatient({ allergies: 'Pollen' }));
+        const cards = buildCards([seg], [med], [vital], [], makePatient({ allergies: 'Pollen' }));
         for (const card of cards) {
             expect(card.flagged).toBe(false);
             expect(card.confidence).toBe(1.0);
@@ -340,18 +423,18 @@ describe('buildCards', () => {
 
     it('skips segments with malformed structured_json without throwing', () => {
         const seg = makeSegment({ structured_json: '{bad json}' });
-        expect(() => buildCards([seg], [], [], makePatient())).not.toThrow();
+        expect(() => buildCards([seg], [], [], [], makePatient())).not.toThrow();
     });
 
     it('filters out segments whose bed_id does not match patient.id (recent_activity only from owned beds)', () => {
         const seg = makeSegment({ bed_id: 'other-patient', transcript: 'Some activity' });
-        const cards = buildCards([seg], [], [], makePatient({ id: 'p-1' }));
+        const cards = buildCards([seg], [], [], [], makePatient({ id: 'p-1' }));
         expect(cards.find((c) => c.type === 'recent_activity')).toBeUndefined();
     });
 
     it('includes segments with null bed_id in recent_activity (unassigned segments)', () => {
         const seg = makeSegment({ bed_id: null, transcript: 'Unassigned observation' });
-        const cards = buildCards([seg], [], [], makePatient({ id: 'p-1' }));
+        const cards = buildCards([seg], [], [], [], makePatient({ id: 'p-1' }));
         expect(cards.find((c) => c.type === 'recent_activity')).toBeTruthy();
     });
 });

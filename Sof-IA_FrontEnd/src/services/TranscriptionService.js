@@ -101,6 +101,12 @@ const TranscriptionService = {
       const session = await SessionService.getActiveShift();
       const nurseId = session?.nurse_name ?? 'unknown';
 
+      // TTL shared by the segment row and all card rows derived from it.
+      const startedAt = session?.started_at ?? new Date().toISOString();
+      const expiresAt = new Date(
+        new Date(startedAt).getTime() + 14 * 60 * 60 * 1000
+      ).toISOString();
+
       const formData = await this._buildFormData(filePath, mimeType);
       formData.append('session_id', sessionId);
       formData.append('timestamp_start', String(timestampStart));
@@ -114,7 +120,8 @@ const TranscriptionService = {
 
       const data = await response.json();
 
-      await this._persistSegment(data, recordingId, sessionId, session, patientId);
+      await this._persistSegment(data, recordingId, sessionId, expiresAt, patientId);
+      await this._fanOutCardData(data.structured, sessionId, patientId, expiresAt, data.confidence);
       await this._markRecordingTranscribed(recordingId);
       await this._deleteRawAudio(filePath);
 
@@ -156,14 +163,8 @@ const TranscriptionService = {
     return record.blob;
   },
 
-  async _persistSegment(apiResponse, recordingId, sessionId, session, patientId = null) {
+  async _persistSegment(apiResponse, recordingId, sessionId, expiresAt, patientId = null) {
     const storage = await getStorage();
-
-    // TTL = session start + 14h (not the default 30-day fallback in DexieAdapter.create)
-    const startedAt = session?.started_at ?? new Date().toISOString();
-    const expiresAt = new Date(
-      new Date(startedAt).getTime() + 14 * 60 * 60 * 1000
-    ).toISOString();
 
     await storage.create('transcription_segments', {
       id: uuidv4(),
@@ -180,6 +181,87 @@ const TranscriptionService = {
       bed_id: patientId,
       expires_at: expiresAt,
     });
+  },
+
+  /**
+   * Fan out structured card data from one API response into the four dedicated
+   * card stores (medications, vital_signs, allergies, safety_info).
+   *
+   * Non-fatal — a write failure is logged but does not fail the chunk pipeline.
+   * Skipped entirely when structured is null/undefined or bedId is null.
+   *
+   * @param {object|null} structured - The `structured` field from the API response
+   * @param {string}      sessionId
+   * @param {string|null} bedId      - Corresponds to patientId / bed_id column
+   * @param {string}      expiresAt  - Same TTL as the parent segment row
+   * @param {number|null} confidence - Top-level confidence score from the API
+   */
+  async _fanOutCardData(structured, sessionId, bedId, expiresAt, confidence) {
+    if (!structured || !bedId) return;
+
+    try {
+      const storage = await getStorage();
+      const base = {
+        session_id: sessionId,
+        bed_id:     bedId,
+        expires_at: expiresAt,
+        confidence: confidence ?? null,
+        flagged:    false,
+      };
+
+      // ── Medications ──────────────────────────────────────────────────────────
+      if (Array.isArray(structured.medications)) {
+        for (const med of structured.medications) {
+          await storage.create('medications', {
+            ...base,
+            medication_name: med.medication_name,
+            dose:            med.dose,
+            frequency:       med.frequency,
+            next_due:        med.next_due,
+            administered_at: med.administered_at ?? null,
+          });
+        }
+      }
+
+      // ── Vital Signs (single row per response) ────────────────────────────────
+      if (structured.vital_signs) {
+        const vs = structured.vital_signs;
+        await storage.create('vital_signs', {
+          ...base,
+          blood_pressure: vs.blood_pressure ?? null,
+          heart_rate:     vs.heart_rate     ?? null,
+          temperature:    vs.temperature    ?? null,
+          spo2:           vs.spo2           ?? null,
+          timestamp:      vs.timestamp,
+        });
+      }
+
+      // ── Allergies ────────────────────────────────────────────────────────────
+      if (Array.isArray(structured.allergies)) {
+        for (const allergy of structured.allergies) {
+          await storage.create('allergies', {
+            ...base,
+            allergen:      allergy.allergen,
+            reaction_type: allergy.reaction_type,
+            severity:      allergy.severity,
+          });
+        }
+      }
+
+      // ── Safety Info ──────────────────────────────────────────────────────────
+      if (Array.isArray(structured.safety_info)) {
+        for (const info of structured.safety_info) {
+          await storage.create('safety_info', {
+            ...base,
+            safety_flag: info.safety_flag,
+            description: info.description,
+          });
+        }
+      }
+    } catch (err) {
+      // Non-fatal — segment is already saved; cards can be re-derived on next response
+      console.warn('[TranscriptionService] Card fan-out failed:', err.message);
+    }
   },
 
   async _markRecordingTranscribed(recordingId) {

@@ -17,8 +17,10 @@ const mockStorage = {
     delete: jest.fn().mockResolvedValue(undefined),
 };
 
+// getStorage mock: factory cannot reference mockStorage (hoisting causes it to be
+// undefined when the factory runs).  Return value is set in beforeEach instead.
 jest.mock('../../repositories', () => ({
-    getStorage: jest.fn().mockResolvedValue(mockStorage),
+    getStorage: jest.fn(),
 }));
 
 const mockSession = {
@@ -37,15 +39,19 @@ jest.mock('../../services/audio/OfflineQueueService', () => ({
     default: { enqueue: jest.fn().mockResolvedValue(undefined) },
 }));
 
+// Same lazy-getter pattern: mockDeleteAsync is undefined at factory-time.
 const mockDeleteAsync = jest.fn().mockResolvedValue(undefined);
 jest.mock('expo-file-system', () => ({
-    deleteAsync: mockDeleteAsync,
+    get deleteAsync() { return mockDeleteAsync; },
 }));
 
-// Capabilities — toggled per describe block
+// Capabilities — toggled per describe block.
+// A getter is used so mockCapabilities is read at access-time, not at factory-time.
+// (babel converts const→var, causing mockCapabilities to be undefined when the
+// jest.mock factory runs due to jest.mock hoisting.)
 const mockCapabilities = { isWeb: true };
 jest.mock('../../config/capabilities', () => ({
-    capabilities: mockCapabilities,
+    get capabilities() { return mockCapabilities; },
 }));
 
 jest.mock('uuid', () => ({ v4: () => 'seg-uuid-1' }));
@@ -55,17 +61,13 @@ jest.mock('uuid', () => ({ v4: () => 'seg-uuid-1' }));
 import TranscriptionService from '../../services/TranscriptionService';
 import SessionService       from '../../services/SessionService';
 import OfflineQueueService  from '../../services/audio/OfflineQueueService';
+import { getStorage }       from '../../repositories';
+import { TRANSCRIPTION_FIXTURE } from '../helpers/transcription-fixture';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const API_RESPONSE = {
-    transcript:      'Patient Alice en chambre 3.',
-    structured:      { patient_name: 'Alice', room: '3', vitals: null, medications: null, actions: null, activity_type: 'assessment' },
-    language:        'fr',
-    confidence:      0.92,
-    timestamp_start: 1713513600000,
-    timestamp_end:   1713513615000,
-};
+// Single source of truth: see src/__tests__/helpers/transcription-fixture.ts
+const API_RESPONSE = TRANSCRIPTION_FIXTURE;
 
 function mockFetchOk() {
     global.fetch = jest.fn().mockResolvedValue({
@@ -101,9 +103,16 @@ const NATIVE_CHUNK = {
 
 beforeEach(() => {
     jest.clearAllMocks();
+    // Re-wire mocks after clearAllMocks (factories cannot capture these vars at
+    // factory-time due to jest.mock hoisting + babel const→var conversion).
+    getStorage.mockResolvedValue(mockStorage);
+    mockDeleteAsync.mockResolvedValue(undefined);
     mockCapabilities.isWeb = true;
     SessionService.getActiveShift.mockResolvedValue(mockSession);
     mockStorage.read.mockResolvedValue({ id: 'blob-uuid-1', blob: new Blob(['audio']) });
+    mockStorage.create.mockResolvedValue({ id: 'seg-uuid-1' });
+    mockStorage.update.mockResolvedValue({});
+    mockStorage.delete.mockResolvedValue(undefined);
 });
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -279,6 +288,176 @@ describe('TranscriptionService', () => {
             await TranscriptionService.processChunk(WEB_CHUNK);
             expect(mockStorage.delete).not.toHaveBeenCalled();
             expect(mockDeleteAsync).not.toHaveBeenCalled();
+        });
+    });
+
+    // ── _fanOutCardData ───────────────────────────────────────────────────────
+
+    describe('_fanOutCardData — card table writes', () => {
+
+        // Chunk that includes a bed (patientId), needed to trigger fan-out
+        const BED_CHUNK = { ...WEB_CHUNK, patientId: 'bed-3' };
+
+        it('writes one medications row per API entry', async () => {
+            mockFetchOk();
+            await TranscriptionService.processChunk(BED_CHUNK);
+
+            const medicationCalls = mockStorage.create.mock.calls.filter(c => c[0] === 'medications');
+            // TRANSCRIPTION_FIXTURE.structured.medications has 2 entries
+            expect(medicationCalls.length).toBe(2);
+            expect(medicationCalls[0][1]).toMatchObject({
+                session_id:      BED_CHUNK.sessionId,
+                bed_id:          'bed-3',
+                medication_name: 'Paracetamol',
+                dose:            '1g',
+                frequency:       'every 6h',
+                flagged:         false,
+            });
+        });
+
+        it('writes the second medications entry (Metformin) with correct fields', async () => {
+            mockFetchOk();
+            await TranscriptionService.processChunk(BED_CHUNK);
+
+            const medicationCalls = mockStorage.create.mock.calls.filter(c => c[0] === 'medications');
+            expect(medicationCalls[1][1]).toMatchObject({
+                session_id:      BED_CHUNK.sessionId,
+                bed_id:          'bed-3',
+                medication_name: 'Metformin',
+                dose:            '500mg',
+                frequency:       'twice daily',
+                flagged:         false,
+            });
+        });
+
+        it('writes one vital_signs row per response', async () => {
+            mockFetchOk();
+            await TranscriptionService.processChunk(BED_CHUNK);
+
+            const vitalCalls = mockStorage.create.mock.calls.filter(c => c[0] === 'vital_signs');
+            expect(vitalCalls.length).toBe(1);
+            expect(vitalCalls[0][1]).toMatchObject({
+                session_id:     BED_CHUNK.sessionId,
+                bed_id:         'bed-3',
+                blood_pressure: '120/80',
+                heart_rate:     72,
+                temperature:    37.2,
+                spo2:           98,
+                flagged:        false,
+            });
+        });
+
+        it('writes one allergies row per API entry', async () => {
+            mockFetchOk();
+            await TranscriptionService.processChunk(BED_CHUNK);
+
+            const allergyCalls = mockStorage.create.mock.calls.filter(c => c[0] === 'allergies');
+            // TRANSCRIPTION_FIXTURE.structured.allergies has 2 entries
+            expect(allergyCalls.length).toBe(2);
+            expect(allergyCalls[0][1]).toMatchObject({
+                session_id:    BED_CHUNK.sessionId,
+                bed_id:        'bed-3',
+                allergen:      'Penicillin',
+                reaction_type: 'anaphylaxis',
+                severity:      'severe',
+                flagged:       false,
+            });
+        });
+
+        it('writes the second allergies entry (Latex) with correct fields', async () => {
+            mockFetchOk();
+            await TranscriptionService.processChunk(BED_CHUNK);
+
+            const allergyCalls = mockStorage.create.mock.calls.filter(c => c[0] === 'allergies');
+            expect(allergyCalls[1][1]).toMatchObject({
+                session_id:    BED_CHUNK.sessionId,
+                bed_id:        'bed-3',
+                allergen:      'Latex',
+                reaction_type: 'contact dermatitis',
+                severity:      'moderate',
+                flagged:       false,
+            });
+        });
+
+        it('writes one safety_info row per API entry', async () => {
+            mockFetchOk();
+            await TranscriptionService.processChunk(BED_CHUNK);
+
+            const safetyCalls = mockStorage.create.mock.calls.filter(c => c[0] === 'safety_info');
+            // TRANSCRIPTION_FIXTURE.structured.safety_info has 2 entries
+            expect(safetyCalls.length).toBe(2);
+            expect(safetyCalls[0][1]).toMatchObject({
+                session_id:  BED_CHUNK.sessionId,
+                bed_id:      'bed-3',
+                safety_flag: 'fall_risk',
+                flagged:     false,
+            });
+        });
+
+        it('writes the second safety_info entry (nil_by_mouth) with correct fields', async () => {
+            mockFetchOk();
+            await TranscriptionService.processChunk(BED_CHUNK);
+
+            const safetyCalls = mockStorage.create.mock.calls.filter(c => c[0] === 'safety_info');
+            expect(safetyCalls[1][1]).toMatchObject({
+                session_id:  BED_CHUNK.sessionId,
+                bed_id:      'bed-3',
+                safety_flag: 'nil_by_mouth',
+                flagged:     false,
+            });
+        });
+
+        it('all card rows share the same expires_at as the segment row', async () => {
+            mockFetchOk();
+            await TranscriptionService.processChunk(BED_CHUNK);
+
+            const segmentExpiry = mockStorage.create.mock.calls
+                .find(c => c[0] === 'transcription_segments')[1].expires_at;
+
+            const cardCalls = mockStorage.create.mock.calls.filter(
+                c => ['medications','vital_signs','allergies','safety_info'].includes(c[0])
+            );
+            for (const call of cardCalls) {
+                expect(call[1].expires_at).toBe(segmentExpiry);
+            }
+        });
+
+        it('skips fan-out when patientId (bedId) is null', async () => {
+            mockFetchOk();
+            // WEB_CHUNK has no patientId → bedId defaults to null
+            await TranscriptionService.processChunk(WEB_CHUNK);
+
+            const cardCalls = mockStorage.create.mock.calls.filter(
+                c => ['medications','vital_signs','allergies','safety_info'].includes(c[0])
+            );
+            expect(cardCalls.length).toBe(0);
+        });
+
+        it('skips fan-out when structured is null', async () => {
+            const nullStructuredResponse = { ...API_RESPONSE, structured: null };
+            global.fetch = jest.fn().mockResolvedValue({
+                ok: true, status: 200,
+                json: jest.fn().mockResolvedValue(nullStructuredResponse),
+            });
+
+            await TranscriptionService.processChunk(BED_CHUNK);
+
+            const cardCalls = mockStorage.create.mock.calls.filter(
+                c => ['medications','vital_signs','allergies','safety_info'].includes(c[0])
+            );
+            expect(cardCalls.length).toBe(0);
+        });
+
+        it('fan-out failure is non-fatal — processChunk still succeeds', async () => {
+            // Make storage.create throw only for card tables
+            mockStorage.create.mockImplementation(async (store) => {
+                if (store === 'medications') throw new Error('Storage full');
+                return { id: 'seg-uuid-1' };
+            });
+            mockFetchOk();
+
+            const result = await TranscriptionService.processChunk(BED_CHUNK);
+            expect(result.success).toBe(true);
         });
     });
 

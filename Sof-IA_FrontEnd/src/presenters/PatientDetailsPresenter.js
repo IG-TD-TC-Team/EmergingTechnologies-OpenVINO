@@ -96,8 +96,25 @@ export default class PatientDetailsPresenter {
             }
 
             const storage = await getStorage();
-            const allSegments = await storage.queryBySession('transcription_segments', this._sessionId);
-            const cards = buildCards(allSegments, this._patient);
+            const bedId = this._patient?.id ?? null;
+
+            const [allSegments, medications, vitalSigns, allergies, safetyInfo] = await Promise.all([
+                storage.queryBySession('transcription_segments', this._sessionId),
+                bedId
+                    ? storage.queryBySessionAndBed('medications', this._sessionId, bedId)
+                    : Promise.resolve([]),
+                bedId
+                    ? storage.queryBySessionAndBed('vital_signs', this._sessionId, bedId)
+                    : Promise.resolve([]),
+                bedId
+                    ? storage.queryBySessionAndBed('allergies', this._sessionId, bedId)
+                    : Promise.resolve([]),
+                bedId
+                    ? storage.queryBySessionAndBed('safety_info', this._sessionId, bedId)
+                    : Promise.resolve([]),
+            ]);
+
+            const cards = buildCards(allSegments, medications, vitalSigns, allergies, safetyInfo, this._patient);
 
             // Only call setCards when something actually changed to avoid spurious re-renders
             const keys = JSON.stringify(cards.map((c) => `${c.type}:${c.preview}`));
@@ -123,17 +140,37 @@ export default class PatientDetailsPresenter {
         }
     }
 
-    // ─── Card navigation (stub — detail screens are US11/US19/US22) ──────────
+    // ─── Card navigation (US11 = CardDetail, US19 = CardCorrection) ─────────
 
-    onCardPress(card, _navigation) {
-        // TODO US11/US19/US22: navigate to Detail View or Edit/Correction screen
-        console.log('[PatientDetailsPresenter] card tapped:', card.type);
+    onCardPress(card, navigation) {
+        if (!card.hasData) return;
+        if (card.flagged) {
+            // Flagged → go straight to Correction screen (US19)
+            navigation.navigate('CardCorrection', { card, patient: this._patient });
+        } else {
+            // Non-flagged with data → read-only Detail View with Edit button (US11)
+            navigation.navigate('CardDetail', { card, patient: this._patient });
+        }
     }
 }
 
 // ─── Pure helper — builds ordered card array ──────────────────────────────────
 
-export function buildCards(segments, patient) {
+/**
+ * Build the ordered card array for the patient details screen.
+ *
+ * @param {object[]} segments   - transcription_segments rows for this session
+ * @param {object[]} medications - rows from the medications card store,
+ *                                 pre-scoped to (session_id, bed_id) by the caller
+ * @param {object[]} vitalSigns  - rows from the vital_signs card store,
+ *                                 pre-scoped to (session_id, bed_id) by the caller
+ * @param {object[]} allergies   - rows from the allergies card store,
+ *                                 pre-scoped to (session_id, bed_id) by the caller
+ * @param {object[]} safetyInfo  - rows from the safety_info card store,
+ *                                 pre-scoped to (session_id, bed_id) by the caller
+ * @param {object}   patient    - patient record (for allergies / notes fallback)
+ */
+export function buildCards(segments, medications, vitalSigns, allergies, safetyInfo, patient) {
     // Filter to this patient's bed; segments with no bed_id are treated as unassigned (included)
     const owned = segments.filter((s) => s.bed_id === null || s.bed_id === patient.id);
 
@@ -172,22 +209,33 @@ export function buildCards(segments, patient) {
         }));
     }
 
-    // 3 — Medications
-    const meds = [];
-    for (const s of byTime) {
-        const list = s.structured?.medications;
-        if (Array.isArray(list)) {
-            for (const m of list) {
-                if (m && !meds.includes(m)) meds.push(m);
-            }
+    // 3 — Medications (from dedicated card store — Task 2/3)
+    //
+    // medications rows are pre-scoped to (session_id, bed_id) and sorted newest-first
+    // by queryBySessionAndBed. We deduplicate by medication_name (keeping the most
+    // recently captured entry), then sort ascending by next_due for display.
+    if (medications.length > 0) {
+        // Deduplicate: first occurrence wins (rows arrive newest-first from the DB)
+        const seen = new Map();
+        for (const med of medications) {
+            if (!seen.has(med.medication_name)) seen.set(med.medication_name, med);
         }
-    }
-    if (meds.length > 0) {
+        // Sort ascending by next_due (ISO strings compare lexicographically)
+        const sorted = [...seen.values()].sort((a, b) =>
+            (a.next_due ?? '').localeCompare(b.next_due ?? '')
+        );
+        // Preview: "Paracetamol — due 14:30" or first two joined with ", "
+        const fmt = (med) => {
+            const time = med.next_due
+                ? new Date(med.next_due).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                : null;
+            return time ? `${med.medication_name} — due ${time}` : med.medication_name;
+        };
         cards.push(card({
             type: 'medications',
             hasData: true,
-            preview: meds.slice(0, 3).join(', ') + (meds.length > 3 ? ` +${meds.length - 3} more` : ''),
-            items: meds,
+            preview: sorted.slice(0, 2).map(fmt).join(', '),
+            items: sorted,
         }));
     }
 
@@ -210,24 +258,48 @@ export function buildCards(segments, patient) {
         }));
     }
 
-    // 5 — Vital Signs (latest segment that has vitals)
-    const vitalsSegment = [...byTime].reverse().find((s) => s.structured?.vitals);
-    if (vitalsSegment) {
-        const v = vitalsSegment.structured.vitals;
-        const parts = Object.entries(v)
-            .filter(([, val]) => val != null)
-            .map(([key, val]) => `${key}: ${val}`)
-            .slice(0, 3);
+    // 5 — Vital Signs (from dedicated card store — Task 2/3)
+    //
+    // vitalSigns rows are pre-scoped to (session_id, bed_id). Take the row with
+    // the latest measurement timestamp. Build preview from named spec fields,
+    // omitting any that are null.  Format: "BP 120/80 — HR 72 — 09:15".
+    if (vitalSigns.length > 0) {
+        const latest = vitalSigns.reduce((best, row) =>
+            (row.timestamp ?? '') > (best.timestamp ?? '') ? row : best
+        );
+        const parts = [];
+        if (latest.blood_pressure != null) parts.push(`BP ${latest.blood_pressure}`);
+        if (latest.heart_rate     != null) parts.push(`HR ${latest.heart_rate}`);
+        if (latest.temperature    != null) parts.push(`T ${latest.temperature}°C`);
+        if (latest.spo2           != null) parts.push(`SpO2 ${latest.spo2}%`);
+        if (latest.timestamp) {
+            parts.push(
+                new Date(latest.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            );
+        }
         cards.push(card({
             type: 'vital_signs',
             hasData: true,
-            preview: parts.join('  ·  '),
-            data: v,
+            preview: parts.join(' — '),
+            data: latest,
         }));
     }
 
-    // 6 — Allergies (from patient record)
-    if (patient?.allergies) {
+    // 6 — Allergies (from dedicated card store; fall back to patient.allergies for existing shifts)
+    if (allergies.length > 0) {
+        const flagged = allergies.some((a) => {
+            const s = (a.severity ?? '').toLowerCase();
+            return s === 'severe' || s === 'critical' || s === 'high';
+        });
+        const names = [...new Set(allergies.map((a) => a.allergen))];
+        cards.push(card({
+            type: 'allergies',
+            hasData: true,
+            flagged,
+            preview: names.join(', '),
+            items: allergies,
+        }));
+    } else if (patient?.allergies) {
         cards.push(card({
             type: 'allergies',
             hasData: true,
@@ -237,11 +309,22 @@ export function buildCards(segments, patient) {
         }));
     }
 
-    // 7 — Safety Information (from patient notes)
-    if (patient?.notes) {
+    // 7 — Safety Information (from dedicated card store; fall back to patient.notes for existing shifts)
+    // Safety cards are always flagged when present — they are always shown as red/orange per card spec.
+    if (safetyInfo.length > 0) {
+        const flags = [...new Set(safetyInfo.map((s) => s.safety_flag))];
         cards.push(card({
             type: 'safety_info',
             hasData: true,
+            flagged: true,
+            preview: flags.join(', '),
+            items: safetyInfo,
+        }));
+    } else if (patient?.notes) {
+        cards.push(card({
+            type: 'safety_info',
+            hasData: true,
+            flagged: true,
             preview: typeof patient.notes === 'string'
                 ? patient.notes
                 : JSON.stringify(patient.notes),

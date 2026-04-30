@@ -22,6 +22,7 @@ import WebMediaRecordingStrategy from './WebMediaRecordingStrategy';
 import ChunkUploadService from './ChunkUploadService';
 import OfflineQueueService from './OfflineQueueService';
 import OfflineQueueManager from '../queue/OfflineQueueManager';
+import NetworkMonitor from '../network/NetworkMonitor';
 import StorageKeys from '../../constants/storageKeys';
 
 const CHUNK_DURATION_MS = 30_000;
@@ -105,7 +106,12 @@ const ContinuousRecordingService = {
         },
       });
 
-      // Start network listener for offline queue
+      // Start NetworkMonitor — drives retryPending() on reconnect and
+      // exposes useNetworkStatus() to components.
+      await NetworkMonitor.start();
+
+      // Legacy connectivity broadcast (keeps DashboardPresenter's connectionStatus
+      // state in sync until it migrates to useNetworkStatus()).
       const unsubOffline = OfflineQueueService.subscribe((status) => {
         this._emit(this._isRecording, status);
       });

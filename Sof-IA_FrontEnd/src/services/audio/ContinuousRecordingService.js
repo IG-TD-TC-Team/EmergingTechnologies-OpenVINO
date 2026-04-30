@@ -21,6 +21,7 @@ import ExpoAvRecordingStrategy from './ExpoAvRecordingStrategy';
 import WebMediaRecordingStrategy from './WebMediaRecordingStrategy';
 import ChunkUploadService from './ChunkUploadService';
 import OfflineQueueService from './OfflineQueueService';
+import OfflineQueueManager from '../queue/OfflineQueueManager';
 import StorageKeys from '../../constants/storageKeys';
 
 const CHUNK_DURATION_MS = 30_000;
@@ -76,6 +77,33 @@ const ContinuousRecordingService = {
           await this._startChunkLoop();
         }
       }
+
+      // Wire the upload function for OfflineQueueManager.retryPending().
+      // Uses the same ChunkUploadService path as live recording so retry
+      // behaviour is identical to first-attempt behaviour.
+      OfflineQueueManager.configure({
+        uploadFn: async (chunkRef, sessionId) => {
+          try {
+            const storage = await getStorage();
+            const recording = await storage.read('audio_recordings', chunkRef);
+            if (!recording) {
+              return { success: false, error: `Recording not found: ${chunkRef}` };
+            }
+            return ChunkUploadService.upload({
+              recordingId: recording.id,
+              filePath: recording.file_path,
+              sessionId,
+              mimeType: recording.format_mime_type,
+              patientId: recording.patient_id ?? null,
+              timestampStart: recording.started_at
+                ? new Date(recording.started_at).getTime()
+                : Date.now(),
+            });
+          } catch (err) {
+            return { success: false, error: err?.message ?? 'Upload failed' };
+          }
+        },
+      });
 
       // Start network listener for offline queue
       const unsubOffline = OfflineQueueService.subscribe((status) => {
@@ -259,7 +287,7 @@ const ContinuousRecordingService = {
       expires_at: new Date(Date.now() + 14 * 60 * 60 * 1000).toISOString(),
     });
 
-    // Upload immediately — TranscriptionService queues to OfflineQueueService on failure
+    // Upload immediately — TranscriptionService queues to OfflineQueueManager on failure
     await ChunkUploadService.upload({
       recordingId: recording.id,
       filePath: uri,

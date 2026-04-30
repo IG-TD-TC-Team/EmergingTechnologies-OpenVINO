@@ -24,6 +24,7 @@ import DashboardPresenter from '../presenters/DashboardPresenter';
 import { AudioSourceBadge, MicInputIcon } from './AudioSourceBadge';
 import { MicPermissionBanner } from './MicPermissionBanner';
 import { useRecordingContext } from '../contexts/RecordingContext';
+import SyncStatusIndicator from '../components/SyncStatusIndicator';
 
 // --- SVG icons ---
 
@@ -275,6 +276,9 @@ function DashboardScreen({ navigation, route }) {
           onPress={() => presenterRef.current?.onToggleSource()}
         />
       </View>
+
+      {/* Offline queue sync status — hidden when idle, non-blocking in all states */}
+      <SyncStatusIndicator />
 
       {/* Bed mapping section */}
       <View style={styles.content}>

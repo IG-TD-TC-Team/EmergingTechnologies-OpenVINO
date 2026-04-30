@@ -23,6 +23,7 @@ import ChunkUploadService from './ChunkUploadService';
 import OfflineQueueService from './OfflineQueueService';
 import OfflineQueueManager from '../queue/OfflineQueueManager';
 import NetworkMonitor from '../network/NetworkMonitor';
+import { registerBackgroundQueueSync } from '../../tasks/backgroundQueueSync';
 import StorageKeys from '../../constants/storageKeys';
 
 const CHUNK_DURATION_MS = 30_000;
@@ -109,6 +110,10 @@ const ContinuousRecordingService = {
       // Start NetworkMonitor — drives retryPending() on reconnect and
       // exposes useNetworkStatus() to components.
       await NetworkMonitor.start();
+
+      // Register background task so the OS can drain the queue while the app
+      // is backgrounded (Android only; no-op on web or without the package).
+      await registerBackgroundQueueSync();
 
       // Legacy connectivity broadcast (keeps DashboardPresenter's connectionStatus
       // state in sync until it migrates to useNetworkStatus()).

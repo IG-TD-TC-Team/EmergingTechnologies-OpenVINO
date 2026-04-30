@@ -25,6 +25,7 @@ import { AudioSourceBadge, MicInputIcon } from './AudioSourceBadge';
 import { MicPermissionBanner } from './MicPermissionBanner';
 import { useRecordingContext } from '../contexts/RecordingContext';
 import SyncStatusIndicator from '../components/SyncStatusIndicator';
+import { useQueueNotifications } from '../hooks/useQueueNotifications';
 
 // --- SVG icons ---
 
@@ -177,6 +178,8 @@ function DashboardScreen({ navigation, route }) {
   const [resumedBanner, setResumedBanner] = useState(!!route?.params?.resumed);
   const [transcriptionSegments, setTranscriptionSegments] = useState([]);
 
+  const { QueueNotifications } = useQueueNotifications();
+
   useEffect(() => {
     if (!resumedBanner) return;
     const t = setTimeout(() => setResumedBanner(false), 3500);
@@ -279,6 +282,9 @@ function DashboardScreen({ navigation, route }) {
 
       {/* Offline queue sync status — hidden when idle, non-blocking in all states */}
       <SyncStatusIndicator />
+
+      {/* Offline queue notifications — transient toasts + persistent storage warning */}
+      <QueueNotifications />
 
       {/* Bed mapping section */}
       <View style={styles.content}>

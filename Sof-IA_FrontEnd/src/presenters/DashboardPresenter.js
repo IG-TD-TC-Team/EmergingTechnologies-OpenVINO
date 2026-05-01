@@ -22,6 +22,7 @@ import SessionService from '../services/SessionService';
 
 import ContinuousRecordingService from '../services/audio/ContinuousRecordingService';
 import EndShiftService from '../services/EndShiftService';
+import OfflineQueueManager from '../services/queue/OfflineQueueManager';
 import { getStorage } from '../repositories';
 
 export default class DashboardPresenter {
@@ -315,16 +316,17 @@ export default class DashboardPresenter {
         this._view.setConfirmVisible(false);
         this._view.setFlushSyncing(true);
 
-        const flushed = await this._attemptQueueFlush();
+        const { flushed, unsyncedCount } = await this._attemptQueueFlush();
 
         this._view.setFlushSyncing(false);
 
         if (flushed) {
-            // Queue clear — proceed straight to cleanup (T5)
+            // Queue clear — proceed straight to cleanup
             await this._proceedWithCleanup(navigation);
         } else {
-            // Still offline — let nurse decide
+            // Chunks remain — let the nurse decide whether to wait or force-delete
             this._pendingNavigation = navigation;
+            this._view.setUnsyncedCount(unsyncedCount);
             this._view.setOfflineGateVisible(true);
         }
     }
@@ -341,10 +343,25 @@ export default class DashboardPresenter {
 
     async _attemptQueueFlush() {
         const sessionId = await SessionService.getActiveSessionId();
-        if (!sessionId) return true;
+        if (!sessionId) return { flushed: true, unsyncedCount: 0 };
 
-        const { success } = await EndShiftService.flushQueue(sessionId);
-        return success;
+        // Attempt to drain the queue — retryPending() is a no-op when already draining.
+        try {
+            await OfflineQueueManager.retryPending();
+        } catch (err) {
+            console.warn('[DashboardPresenter] retryPending error during end-shift flush:', err);
+        }
+
+        // Check what's still in the queue after the drain attempt.
+        try {
+            const stats = await OfflineQueueManager.getQueueStats();
+            const unsyncedCount = stats.pendingCount + stats.failedCount;
+            return { flushed: unsyncedCount === 0, unsyncedCount };
+        } catch (err) {
+            console.warn('[DashboardPresenter] getQueueStats error during end-shift flush:', err);
+            // If we cannot read stats, assume nothing is pending and let cleanup proceed.
+            return { flushed: true, unsyncedCount: 0 };
+        }
     }
 
     async _proceedWithCleanup(navigation) {

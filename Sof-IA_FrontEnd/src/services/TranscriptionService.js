@@ -4,7 +4,7 @@
  * Sends audio chunks to POST /api/voice/transcribe-and-structure, persists
  * the response as a transcription_segment, and cleans up the raw audio.
  *
- * On API failure the chunk is handed to OfflineQueueService for retry.
+ * On API failure the chunk is handed to OfflineQueueManager for retry.
  *
  * TTL for stored segments = session.started_at + 14 hours (not the default 30 days).
  *
@@ -75,7 +75,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { getStorage } from '../repositories';
 import { capabilities } from '../config/capabilities';
 import SessionService from './SessionService';
-import OfflineQueueService from './audio/OfflineQueueService';
+import OfflineQueueManager from './queue/OfflineQueueManager';
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.sofia-health.example/v1';
 const ENDPOINT = `${API_BASE_URL}/api/voice/transcribe-and-structure`;
@@ -129,7 +129,7 @@ const TranscriptionService = {
       return { success: true };
     } catch (error) {
       console.warn('[TranscriptionService] Chunk failed, queuing for retry:', error.message);
-      await OfflineQueueService.enqueue(recordingId, sessionId);
+      await OfflineQueueManager.enqueue(recordingId, sessionId);
       return { success: false, error: error.message };
     }
   },

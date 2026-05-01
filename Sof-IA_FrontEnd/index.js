@@ -1,5 +1,9 @@
 import { registerRootComponent } from 'expo';
 
+// Import early so TaskManager.defineTask() is called before registerRootComponent.
+// This file is a no-op on web and when expo-task-manager is not yet installed.
+import './src/tasks/backgroundQueueSync';
+
 import App from './App';
 
 // registerRootComponent calls AppRegistry.registerComponent('main', () => App);

@@ -1,91 +1,88 @@
-# US10 — Patient Details Dashboard ("What do I know")
+# US11 — Clinical Activity Detail View
 
-**Story**: As a nurse I want to see all information Sofia knows about a specific patient organized in cards so that I have a complete overview of their current status, medications, and activities.
+**Story**: As a nurse, I want to view the complete clinical narrative of a documented activity (assessment, examination, patient interaction) so that I can review the full context, reasoning, and observations that were captured during the voice recording.
 
-**Points**: 3 | **Sprint**: Sprint 3 | **Predecessor**: US9 | **Successors**: US11, US19, US22
+**Points**: 3 | **Sprint**: Final Sprint | **Predecessors**: US10, US6 | **Successor**: US19
 
 **Figma Design**: https://www.figma.com/design/xatJv9J3dQWl258H1l4eWM/Sof-IA-HealthCare-assistant?node-id=0-1&t=wM6oBNnyuvEnom4G-1
-**Figma Prototype**: https://www.figma.com/proto/xatJv9J3dQWl258H1l4eWM/Sof-IA-HealthCare-assistant?node-id=7-2251&starting-point-node-id=7%3A2250
+**Figma Prototype**: https://www.figma.com/proto/xatJv9J3dQWl258H1l4eWM/Sof-IA-HealthCare-assistant?node-id=7-2251&p=f&viewport=96%2C335%2C0.03&t=fmQ4xeKLXRZ9wFQu-1&scaling=min-zoom&content-scaling=fixed&starting-point-node-id=7%3A2250&page-id=0%3A1
 
 ---
 
-## Sprint 3 Story Map
+## MVP Scope
 
-These 4 stories form a layered stack on the same `BedDetails` screen area. US10 is the foundation; the others extend it.
-
-| US | Owner | What it owns |
-|---|---|---|
-| **US10** (this branch) | Julio | Screen shell, card UI components, `BedDetailScreen` rewrite, navigation entry point |
-| **US22** | Tatiana | Dedicated storage tables (`medications`, `vital_signs`, `allergies`, `safety_info`), richer card schemas, `flagged`/`confidence` system, real-time updates from API |
-| **US11** | — | `ActivityDetailScreen` — tap Recent Activity card → full clinical narrative + collapsible translation |
-| **US19** | — | `CorrectionScreen` — tap flagged card → edit AI values locally, audit trail |
-
-### Layering contract
-
-- **US10** reads card data from `transcription_segments.structured_json` — this is intentionally temporary. When US22 lands, Tatiana replaces the data source in `PatientDetailsPresenter._loadCards()` to read from dedicated tables. The view (`BedDetailScreen`) is not touched.
-- **US10 `InfoCard` must already accept `flagged` + `confidence` props** so US22 can set them without touching the component.
-- **`onCardPress`** passes `{ card, patient }` to navigation. US11 adds the `ActivityDetail` route; US19 adds `CorrectionScreen`. US10 stubs both with a `console.log` — do NOT add blank nav routes in `AppNavigator.js`.
-- **Storage tables** (`medications`, `vital_signs`, `allergies`, `safety_info`) are US22's responsibility. US10 creates no new migrations.
+- **Translation section**: removed — language is displayed in the metadata bar only (ISO 639-1 code from `transcription_segments.language`, captured by Whisper).
+- **Timestamp format**: "Today HH:MM" — always same-day since all data is cleared at end of shift.
+- **Demo navigation**: demo cards (`recent_activity`, `next_reminder`, `vital_signs`) already have `hasData: true && !flagged`. Once T4 registers the `CardDetail` route, tapping any of them navigates to `CardDetailScreen`. No extra demo logic needed. Demo cards have no `ts_start` / `language` — metadata bar shows "Today –" / "Language: –" for those fields, which is acceptable.
 
 ---
 
 ## Context & Constraints
 
-- **Entry point**: tap a bed card on the Main Dashboard → navigates to `BedDetails` (already registered in `AppNavigator.js`).
-- **Existing file** `src/screens/BedDetailScreen.js` is a placeholder — must be **fully replaced**.
-- **Architecture**: MVP — `PatientDetailsPresenter.js` owns all logic; `BedDetailScreen.js` is pure view.
-- **Data source (US10)**: `transcription_segments`, queried per session and filtered by `bed_id == patient.id`.
-- `DashboardPresenter.onBedPress` currently passes `{ patient, segments }` — add `sessionId` so `PatientDetailsPresenter` can poll for live updates.
-- **Bottom controls** are the same as the Main Dashboard — reuse `AudioSourceBadge` / `MicInputIcon`.
-- **Do NOT add** `ActivityDetail` or `CorrectionScreen` routes to `AppNavigator.js` (US11/US19 own those).
+- **Entry point**: tap "Recent Activity" card (`hasData && !flagged`) from `BedDetailScreen`. `PatientDetailsPresenter.onCardPress` already calls `navigation.navigate('CardDetail', { card, patient })`.
+- **Architecture**: MVP — `CardDetailPresenter.js` owns all logic; `CardDetailScreen.js` is pure view.
+- **Read-only**: this screen does not write to any storage.
+- **Scroll position on back**: `navigation.goBack()` on the React Navigation stack preserves `BedDetailScreen` state naturally.
+- **Clipboard**: `expo-clipboard` must be added to `package.json` (T0) so it installs automatically with `npm install`. Use `Clipboard.setStringAsync(text)`.
 
 ---
 
-## Card Specification
+## Card Payload (via navigation params)
 
-Cards are displayed in this fixed priority order:
+The `card` object from `PatientDetailsPresenter.onCardPress`:
 
-| # | Card type | Icon | Data source (US10) | Always shown | Tappable |
-|---|---|---|---|---|---|
-| 1 | Session Active | Shield | `sessions.started_at` / `expires_at` | Yes (if active session) | No |
-| 2 | Recent Activity | Clock | Latest `transcription_segments` row | No | Yes (eye icon if hasData) |
-| 3 | Medications | Pill | `medications[]` across segments, deduplicated | No | Yes |
-| 4 | Next Reminder | Bell | `actions[]` across segments (first action) | No | Yes |
-| 5 | Vital Signs | Heart | Latest `vitals` object from segments | No | Yes |
-| 6 | Allergies | Warning | `patients.allergies` field | No | Yes |
-| 7 | Safety Information | Info | `patients.notes` field | No | Yes |
-
-**Card props (forward-compatible with US22)**:
 ```js
 {
-  type: string,           // 'recent_activity' | 'medications' | 'vital_signs' | ...
-  hasData: bool,          // true → show green eye icon
-  flagged: bool,          // false in US10; US22 sets true when confidence < threshold
-  confidence: number,     // 1.0 in US10 (no AI scoring yet); US22 sets real value
-  preview: string,        // one-line summary text
-  items?: any[],          // structured data for detail screens (US11/US19)
-  data?: object,          // raw object (vitals)
+  type: 'recent_activity',
+  hasData: true,
+  flagged: false,
+  preview: '14:10  ·  Fatigue post-partum',
+  activityType: 'Fatigue post-partum' | null,
+  transcript: 'Patiente : Je dors pas bien...' | null,
+  // ← T1 adds these:
+  language: 'fr' | null,       // ISO 639-1 from Transcription.language
+  ts_start: 1714567890000 | null,
+  sections: [{ header: 'Assessment', body: '...' }] | null,
 }
 ```
 
-**Card interaction**:
-- `hasData && !flagged` → green eye icon top-right, tap → `onCardPress` (stub for US11/US19)
-- `flagged` → orange/yellow background, warning icon instead of eye, tap → `onCardPress` (stub for US19)
-- `!hasData` → muted card, no icon, tap → `onCardPress` (stub for US19)
+---
 
-**Empty state**: Session Active card + `"No information extracted yet. Start recording to capture patient data."`
+## Navigation Contract
 
-**Animations**: fade-in slide when a new card appears; brief pulse scale on card data update.
+```js
+// Entry — already wired in PatientDetailsPresenter.onCardPress:
+navigation.navigate('CardDetail', { card, patient });
+
+// Edit button (US19 stub — do NOT add CardCorrection route yet):
+// console.log('[CardDetailPresenter] edit stub')
+// US19 will receive: { patientId: patient.id, fieldKey: 'recent_activity', currentValue: card.transcript }
+```
 
 ---
 
-## Screen Header
+## Screen Spec
 
 ```
-[←]   [patient icon + bed icon]   "What do I know"
-[AudioSourceBadge — green: "Rode Wireless Mini connected" / gray: "Using device mic"]
-[Bed X: 'Name']   ← patient identifier, below badge
+╔══════════════════════════════════════════════╗
+║  [←]  [patient+bed icon]  "Pain assessment"  ║  Header (h=64)
+║  [AudioSourceBadge: "Pin device connected…"] ║
+║  Bed 1: 'Alice'                              ║
+╠══════════════════════════════════════════════╣
+║  Today 14:10   Language: fr   [✏️]  [📋]    ║  Metadata bar (fixed, bg #F7F7F7)
+╠══════════════════════════════════════════════╣
+║  Assessment                                  ║  ↑
+║  Patient reports fatigue post-partum…        ║  |
+║                                              ║  ScrollView (flex:1)
+║  Plan                                        ║  |
+║  Monitor BP. Educate on breastfeeding…       ║  ↓
+╚══════════════════════════════════════════════╝
 ```
+
+- **If `sections` present**: render each `{ header, body }` as section header + body text.
+- **Else if `transcript`**: render raw text as plain paragraphs.
+- **Else**: `"No narrative available."`
+- **If `ts_start` is null**: show `"Today –"`. **If `language` is null**: show `"Language: –"`.
 
 ---
 
@@ -93,113 +90,134 @@ Cards are displayed in this fixed priority order:
 
 | Step | Status | Description |
 |---|---|---|
-| F1 | ✓ Done | `PatientDetailsPresenter.js` — mount, card aggregation, live polling |
-| F2 | ✓ Done | Rewrite `BedDetailScreen.js` — full "What do I know" UI |
-| F3 | ✓ Done | Update `DashboardPresenter.onBedPress` — add `sessionId` to nav params |
-| F4 | ✓ Done | Tests |
+| T0 | ✓ Done | Add `expo-clipboard` to `package.json` → auto-installs with `npm install` |
+| T1 | ✓ Done | Enrich `buildCards()` in `PatientDetailsPresenter.js` — add `language`, `ts_start`, `sections` to `recent_activity` card |
+| T2 | ✓ Done | `CardDetailPresenter.js` — mount, metadata derivation, clipboard, edit stub |
+| T3 | ✓ Done | `CardDetailScreen.js` — full UI per spec |
+| T4 | ✓ Done | Register `CardDetail` in `AppNavigator.js` |
+| T5 | ✓ Done | Tests |
 
 ---
 
 ## Implementation Steps
 
-### ~~Step 1 — `PatientDetailsPresenter.js`~~ ✓
+### Task 0 — Add `expo-clipboard` to `package.json`
 
-**File**: `src/presenters/PatientDetailsPresenter.js` — created.
+**File**: `Sof-IA_FrontEnd/package.json`
 
-Key behaviours:
-- `mount({ patient, sessionId })` → resolves audio source, loads session card, loads info cards, subscribes to recording state, starts 5s poll.
-- `_loadCards()` → queries `transcription_segments` by session, filters by `bed_id`, calls `buildCards()`, only calls `setCards` when result changes (JSON key diff).
-- `buildCards(segments, patient)` exported as pure function for unit tests and future replacement by US22.
-- `onCardPress(card, navigation)` stubs with `console.log` — US11/US19 will implement.
+Add to `dependencies`:
+```json
+"expo-clipboard": "~7.0.0"
+```
+
+Expo 55 is compatible with `expo-clipboard` 7.x. This ensures `npm install` (or `yarn`) handles it automatically with no manual step.
 
 ---
 
-### Step 2 — Rewrite `BedDetailScreen.js` (F2)
+### Task 1 — Enrich `recent_activity` card in `buildCards()`
 
-**File**: `src/screens/BedDetailScreen.js` — full replacement.
+**File**: `src/presenters/PatientDetailsPresenter.js`
 
-**View interface** injected by the screen into the presenter:
+In the `// 2 — Recent Activity` block, add three fields:
+
+```js
+cards.push(card({
+    type: 'recent_activity',
+    hasData: true,
+    preview: [...],
+    activityType,
+    transcript: latest.transcript ?? null,
+    language: latest.language ?? null,              // ← ADD (ISO 639-1 from Whisper)
+    ts_start: latest.ts_start ?? null,              // ← ADD
+    sections: latest.structured?.sections ?? null,  // ← ADD
+}));
+```
+
+No other changes. Update `PatientDetailsPresenter.test.js` assertions to pass through the three new fields.
+
+---
+
+### Task 2 — `CardDetailPresenter.js`
+
+**File**: `src/presenters/CardDetailPresenter.js` — CREATE
+
+**View interface** (injected by the screen):
 ```js
 {
   setAudioSource({ sourceKey, sourceLabel, canToggle }),
-  setRecording(bool),
-  setConnectionStatus('online' | 'offline-buffering'),
-  setBrowserSupported(bool),
-  setSessionCard({ startedAt, expiresAt } | null),
-  setCards(card[]),
+  setMetadata({ timeLabel, language }),   // timeLabel = "Today HH:MM" or "Today –"
+  setNarrative({ transcript, sections }),
+  showCopyToast(),
 }
 ```
 
-**Screen state** (useState):
+**Key behaviours**:
+- `mount({ card, patient })` → `_resolveAudioSource()`, `_view.setMetadata(_deriveMetadata(card.ts_start, card.language))`, `_view.setNarrative({ transcript: card.transcript ?? null, sections: card.sections ?? null })`.
+- `_deriveMetadata(tsStart, language)`:
+  - `timeLabel`: if `tsStart` → `"Today " + HH:MM formatted from tsStart`; else `"Today –"`.
+  - `language`: pass through or `"–"` if null.
+- `onCopyPress()` → builds full text (sections joined, or raw transcript) → `Clipboard.setStringAsync(text)` → `this._view.showCopyToast()`.
+- `onEditPress()` → `console.log('[CardDetailPresenter] edit stub — US19')`.
+- `unmount()` → `AudioSourceResolver.resetOverride()`.
+
+---
+
+### Task 3 — `CardDetailScreen.js`
+
+**File**: `src/screens/CardDetailScreen.js` — CREATE
+
+**State** (`useState`): `audioSource`, `metadata`, `narrative`, `copyToastVisible`
+
+**View interface** bound to presenter:
 ```js
-audioSource, recording, browserSupported, sessionCard, cards
+{
+  setAudioSource:  (src)  => setAudioSource(src),
+  setMetadata:     (m)    => setMetadata(m),
+  setNarrative:    (n)    => setNarrative(n),
+  showCopyToast:   ()     => { setCopyToastVisible(true); setTimeout(() => setCopyToastVisible(false), 2000); },
+}
 ```
 
 **Layout** (top → bottom):
+
 1. `SafeAreaView`
-2. **Header row** (height 64): back arrow `←` | patient icon SVG + bed icon SVG + `"What do I know"` (centered flex:1) | spacer 48px
-3. **`AudioSourceBadge`** (centered, same as Dashboard, with `onPress → presenter.onToggleSource()`)
+2. **Header row** (h=64): `←` `TouchableOpacity` → `navigation.goBack()` | `[patient-with-bed SVG]` + `Text` (card.activityType or `"Clinical Activity"`) centered flex:1 | spacer 48px
+3. **`AudioSourceBadge`** — same component as `BedDetailScreen`, `onPress → presenter.onToggleSource()`
 4. **Patient identifier** `Text`: `"Bed X: 'Name'"` or `"Bed X"` if no name
-5. **`ScrollView`** (flex:1):
-   - `SessionActiveCard` (always shown if `sessionCard != null`)
-   - `InfoCard[]` for each card in `cards`
-   - Empty state `Text` if `cards.length === 0`
-6. **Bottom bar** (fixed, same layout as Dashboard): Speaker placeholder (left, disabled) | `PulsingMicButton` (center) | `MicInputIcon` + label (right)
+5. **Metadata bar** (`backgroundColor: '#F7F7F7'`, padding 10–12, fixed — not inside ScrollView):
+   - Left: `"{metadata.timeLabel}"` · `"Language: {metadata.language}"` (small muted text)
+   - Right: `[edit-pencil SVG]` `TouchableOpacity` → `presenter.onEditPress()` | `[copy SVG]` `TouchableOpacity` → `presenter.onCopyPress()` (min 44×44pt each)
+6. **`ScrollView`** (flex:1, padding 16):
+   - If `narrative.sections`: map each `{ header, body }` → section header `Text` + body `Text`
+   - Else if `narrative.transcript`: `<Text>{narrative.transcript}</Text>`
+   - Else: `<Text style={styles.empty}>"No narrative available."</Text>`
+7. **Copy toast** (Animated, absolute overlay, centered, `backgroundColor: 'rgba(0,0,0,0.7)'`, borderRadius 8): `"Copied to clipboard"` — visible for 2s when `copyToastVisible`
 
-**`SessionActiveCard`** (not tappable):
-- Inline shield SVG, title `"Session Active"`, body `Started: HH:MM  /  Expires: HH:MM`
-- Background `#F5F5F5`, border radius 12
-
-**`InfoCard`** (tappable):
-```js
-// Props: type, hasData, flagged, confidence, preview, onPress
-```
-- Icon per type (inline SVG constants at top of file)
-- Preview text (1 line, ellipsis)
-- If `hasData && !flagged`: green eye SVG icon top-right
-- If `flagged`: orange/yellow background (`#FFFBEC`), warning SVG icon top-right
-- `TouchableOpacity` → `onPress`
-- Animated entry: `Animated.Value(0)` opacity + translateY `+12 → 0` on mount
-
-**`PulsingMicButton`**: copy from `DashboardScreen.js` (identical — do not abstract yet).
-
-**SVG icons needed** (inline constants): shield, clock, pill, bell, heart, warning-triangle, info-circle, eye, arrow-back, patient-with-bed.
+**SVG icons** (inline constants, same pattern as `BedDetailScreen.js`): `arrow-back`, `patient-with-bed`, `edit-pencil`, `copy-clipboard`.
 
 ---
 
-### Step 3 — Update `DashboardPresenter.onBedPress` (F3)
+### Task 4 — Register `CardDetail` in `AppNavigator.js`
 
-**File**: `src/presenters/DashboardPresenter.js`
-
-Add `sessionId` to the navigation params:
+**File**: `src/navigation/AppNavigator.js`
 
 ```js
-async onBedPress(patient, navigation) {
-  this._activePatient = { id: patient.id, name: patient.name, bed: patient.bed };
-  this._view.setActivePatient(this._activePatient);
+import CardDetailScreen from '../screens/CardDetailScreen';
 
-  const sessionId = await SessionService.getActiveSessionId();
-  try {
-    const storage = await getStorage();
-    const segments = sessionId
-      ? await storage.queryBySession('transcription_segments', sessionId)
-      : [];
-    navigation.navigate('BedDetails', { patient, segments, sessionId }); // ← add sessionId
-  } catch (e) {
-    console.error('[DashboardPresenter] onBedPress nav error:', e);
-    navigation.navigate('BedDetails', { patient, segments: [], sessionId: null });
-  }
-}
+// Inside Stack.Navigator, after BedDetails:
+<Stack.Screen name="CardDetail" component={CardDetailScreen} options={SLIDE_OPTIONS} />
 ```
+
+This also enables demo card navigation — once this route exists, tapping any demo card with `hasData: true && !flagged` (recent_activity, next_reminder, vital_signs) will open `CardDetailScreen`.
 
 ---
 
-### Step 4 — Tests (F4)
+### Task 5 — Tests
 
 | File | What to test |
 |---|---|
-| `src/__tests__/presenters/PatientDetailsPresenter.test.js` | `buildCards`: segments with medications → card present; empty segments → empty array; `flagged=false` default; session card falls back to `started_at + 14h` when `expires_at` is null |
-| `src/__tests__/screens/BedDetailScreen.test.js` | Renders `"What do I know"` title; `SessionActiveCard` visible; empty state message when `cards=[]`; `InfoCard` shows eye icon when `hasData=true && flagged=false`; flagged card has orange bg |
+| `src/__tests__/presenters/CardDetailPresenter.test.js` | `mount` sets metadata and narrative; `_deriveMetadata` returns `"Today 14:10"` for valid ts_start; returns `"Today –"` when null; `onCopyPress` calls `Clipboard.setStringAsync` and triggers `showCopyToast`; `onEditPress` does not throw |
+| `src/__tests__/screens/CardDetailScreen.test.js` | Renders activityType as title; falls back to "Clinical Activity" if null; metadata bar shows timeLabel and language; sections rendered when present; falls back to transcript; "No narrative available." when both null; copy icon present and pressable |
 
 ---
 
@@ -207,18 +225,19 @@ async onBedPress(patient, navigation) {
 
 | Action | File | Status |
 |---|---|---|
-| CREATE | `src/presenters/PatientDetailsPresenter.js` | ✓ Done |
-| REPLACE | `src/screens/BedDetailScreen.js` | Next |
-| MODIFY | `src/presenters/DashboardPresenter.js` | — |
-| CREATE | `src/__tests__/presenters/PatientDetailsPresenter.test.js` | — |
-| CREATE | `src/__tests__/screens/BedDetailScreen.test.js` | — |
+| MODIFY | `package.json` — add expo-clipboard | — |
+| MODIFY | `src/presenters/PatientDetailsPresenter.js` | — |
+| CREATE | `src/presenters/CardDetailPresenter.js` | — |
+| CREATE | `src/screens/CardDetailScreen.js` | — |
+| MODIFY | `src/navigation/AppNavigator.js` | — |
+| CREATE | `src/__tests__/presenters/CardDetailPresenter.test.js` | — |
+| CREATE | `src/__tests__/screens/CardDetailScreen.test.js` | — |
 
 ---
 
 ## Out of Scope
 
-- `ActivityDetailScreen` — US11 (tap Recent Activity card → clinical narrative)
-- `CorrectionScreen` — US19 (tap flagged card → edit AI values)
-- Dedicated tables (`medications`, `vital_signs`, `allergies`, `safety_info`) — US22 (Tatiana)
-- `flagged` cards being triggered — US22 sets `flagged=true` based on `confidence`; US10 only wires the UI for it
-- Medications sorted by next due time — no `next_due` field until US22
+- Translation section — removed from MVP; language code from transcription API shown in metadata bar only
+- `CardCorrection` / edit persistence — US19
+- `PatientField` / `PatientRecord` types in `types/patient.ts` — US19's responsibility
+- Analytics tracking of copy/edit actions — future sprint

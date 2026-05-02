@@ -199,6 +199,9 @@ const TranscriptionService = {
   async _fanOutCardData(structured, sessionId, bedId, expiresAt, confidence) {
     if (!structured || !bedId) return;
 
+    // Log the full structured payload so field-name mismatches are visible in devtools
+    console.log('[TranscriptionService] fan-out structured:', JSON.stringify(structured));
+
     try {
       const storage = await getStorage();
       const base = {
@@ -210,30 +213,68 @@ const TranscriptionService = {
       };
 
       // ── Medications ──────────────────────────────────────────────────────────
-      if (Array.isArray(structured.medications)) {
-        for (const med of structured.medications) {
+      // LLM returns either objects OR plain strings like "paracetamol - 1 gramme"
+      const meds = structured.medications ?? structured.medicaments ?? structured.drugs ?? [];
+      if (Array.isArray(meds) && meds.length > 0) {
+        for (const med of meds) {
+          let medName, medDose, medFrequency, medNextDue, medAdministeredAt;
+
+          if (typeof med === 'string') {
+            // Parse "medication_name - dose" format
+            const dashIdx = med.indexOf(' - ');
+            if (dashIdx !== -1) {
+              medName = med.substring(0, dashIdx).trim();
+              medDose = med.substring(dashIdx + 3).trim();
+            } else {
+              medName = med.trim();
+              medDose = '';
+            }
+            medFrequency     = '';
+            medNextDue       = new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString();
+            medAdministeredAt = null;
+          } else {
+            medName = (
+              med.medication_name || med.name || med.drug || med.medicament
+              || med.medicationName || med.medicine || ''
+            ).trim();
+            medDose          = med.dose || med.dosage || med.amount || med.posologie || '';
+            medFrequency     = med.frequency || med.interval || med.schedule || med.frequence || '';
+            medNextDue       = med.next_due || med.nextDue || med.next_administration
+                               || new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString();
+            medAdministeredAt = med.administered_at ?? null;
+          }
+
           await storage.create('medications', {
             ...base,
-            medication_name: med.medication_name,
-            dose:            med.dose,
-            frequency:       med.frequency,
-            next_due:        med.next_due,
-            administered_at: med.administered_at ?? null,
+            medication_name: medName || 'Medication identified',
+            dose:            medDose,
+            frequency:       medFrequency,
+            next_due:        medNextDue,
+            administered_at: medAdministeredAt,
           });
         }
       }
 
       // ── Vital Signs (single row per response) ────────────────────────────────
-      if (structured.vital_signs) {
-        const vs = structured.vital_signs;
-        await storage.create('vital_signs', {
-          ...base,
-          blood_pressure: vs.blood_pressure ?? null,
-          heart_rate:     vs.heart_rate     ?? null,
-          temperature:    vs.temperature    ?? null,
-          spo2:           vs.spo2           ?? null,
-          timestamp:      vs.timestamp,
-        });
+      // Accept 'vital_signs', 'vitals', 'signes_vitaux' from the LLM
+      const vs = structured.vital_signs ?? structured.vitals ?? structured.signes_vitaux ?? null;
+      if (vs) {
+        const hasAnyValue =
+          (vs.blood_pressure ?? vs.bp ?? vs.tension) != null ||
+          (vs.heart_rate     ?? vs.hr ?? vs.fc)      != null ||
+          (vs.temperature    ?? vs.temp)              != null ||
+          (vs.spo2           ?? vs.saturation)        != null;
+
+        if (hasAnyValue) {
+          await storage.create('vital_signs', {
+            ...base,
+            blood_pressure: vs.blood_pressure ?? vs.bp  ?? vs.tension    ?? null,
+            heart_rate:     vs.heart_rate     ?? vs.hr  ?? vs.fc         ?? null,
+            temperature:    vs.temperature    ?? vs.temp                  ?? null,
+            spo2:           vs.spo2           ?? vs.saturation            ?? null,
+            timestamp:      vs.timestamp      ?? vs.measured_at           ?? new Date().toISOString(),
+          });
+        }
       }
 
       // ── Allergies ────────────────────────────────────────────────────────────
@@ -241,9 +282,9 @@ const TranscriptionService = {
         for (const allergy of structured.allergies) {
           await storage.create('allergies', {
             ...base,
-            allergen:      allergy.allergen,
-            reaction_type: allergy.reaction_type,
-            severity:      allergy.severity,
+            allergen:      allergy.allergen      || allergy.allergen_name || '',
+            reaction_type: allergy.reaction_type || allergy.reaction      || '',
+            severity:      allergy.severity      || allergy.severite      || 'unknown',
           });
         }
       }
@@ -253,8 +294,8 @@ const TranscriptionService = {
         for (const info of structured.safety_info) {
           await storage.create('safety_info', {
             ...base,
-            safety_flag: info.safety_flag,
-            description: info.description,
+            safety_flag: info.safety_flag || info.flag  || '',
+            description: info.description || info.details || '',
           });
         }
       }

@@ -15,7 +15,7 @@ import { BaseEntity } from './BaseEntity';
  * Privacy & Data Retention:
  * - PHI (Protected Health Information) is stored locally only
  * - Automatically purged on shift end (expires_at = session.ended_at)
- * - No backend sync in v1 (future feature requires HIPAA compliance)
+ * - No backend sync in v1
  */
 
 /**

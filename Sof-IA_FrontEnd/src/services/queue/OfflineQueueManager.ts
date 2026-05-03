@@ -186,6 +186,26 @@ class OfflineQueueManagerClass {
   // ─── Public API ────────────────────────────────────────────────────────────
 
   /**
+   * Mark all pending entries as failed.
+   * Called on app startup to discard stale chunks from a previous session
+   * whose audio blobs no longer exist after a page reload.
+   */
+  async clearStale(): Promise<void> {
+    try {
+      const repo = await this._getRepo();
+      const pending = await repo.getPending();
+      for (const entry of pending) {
+        await repo.markFailed(entry.id);
+      }
+      if (pending.length > 0) {
+        console.log(`[OfflineQueueManager] Cleared ${pending.length} stale queue entry/entries from previous session`);
+      }
+    } catch (err) {
+      console.warn('[OfflineQueueManager] clearStale error:', err);
+    }
+  }
+
+  /**
    * Add a new audio chunk to the offline queue.
    *
    * Always creates a fresh entry (retry_count=0, status='pending').

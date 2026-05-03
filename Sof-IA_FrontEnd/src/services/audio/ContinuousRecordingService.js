@@ -64,21 +64,13 @@ const ContinuousRecordingService = {
    */
   async initialize() {
     try {
-      const raw = await AsyncStorage.getItem(ASYNC_STATE_KEY);
-      if (raw) {
-        const saved = JSON.parse(raw);
-        if (saved.isRecording && saved.sessionId) {
-          console.log('[ContinuousRecording] Restoring recording state for session:', saved.sessionId);
-          // Emit immediately for <200ms UI restore
-          this._isRecording = true;
-          this._sessionId = saved.sessionId;
-          this._patientId = saved.patientId ?? null;
-          this._chunkIndex = saved.chunkIndex ?? 0;
-          this._emit(true, 'online');
-          // Resume the chunk loop
-          await this._startChunkLoop();
-        }
-      }
+      // A page reload/app restart always destroys the MediaRecorder — the recording
+      // session cannot be resumed. Clear any stale persisted state so the UI
+      // never shows a phantom "Recording" or "Buffering" indicator on launch.
+      await this._clearPersistedState();
+      this._isRecording = false;
+      await OfflineQueueService.clearStaleEntries();  // clears sofia_db recording_queue
+      await OfflineQueueManager.clearStale();          // clears sofia_queue offline_queue
 
       // Wire the upload function for OfflineQueueManager.retryPending().
       // Uses the same ChunkUploadService path as live recording so retry

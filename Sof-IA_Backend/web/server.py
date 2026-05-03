@@ -61,6 +61,7 @@ async def lifespan(app: FastAPI):
     slm.load()
     app.state.voice_asr = asr
     app.state.voice_slm = slm
+    app.state.pipeline_lock = asyncio.Lock()  # OpenVINO infer request is not thread-safe
 
     prompt_rel = vp.get("extraction_prompt_file", "data/prompts/structured_extraction_prompt.txt")
     prompt_path = _CONFIG_PATH.parents[1] / prompt_rel
@@ -530,16 +531,17 @@ async def transcribe_and_structure(
     Returns the transcript, structured fields, language, confidence, and timestamps.
     """
     audio_bytes = await audio.read()
-    result = await run_transcribe_and_structure(
-        audio_bytes=audio_bytes,
-        mime_type=audio.content_type or "audio/webm",
-        session_id=session_id,
-        timestamp_start=timestamp_start,
-        nurse_id=nurse_id,
-        asr_model=request.app.state.voice_asr,
-        slm_model=request.app.state.voice_slm,
-        extraction_prompt_template=request.app.state.voice_extraction_prompt,
-    )
+    async with request.app.state.pipeline_lock:
+        result = await run_transcribe_and_structure(
+            audio_bytes=audio_bytes,
+            mime_type=audio.content_type or "audio/webm",
+            session_id=session_id,
+            timestamp_start=timestamp_start,
+            nurse_id=nurse_id,
+            asr_model=request.app.state.voice_asr,
+            slm_model=request.app.state.voice_slm,
+            extraction_prompt_template=request.app.state.voice_extraction_prompt,
+        )
     audit_event(
         "voice_transcribed",
         request.client.host if request.client else "-",

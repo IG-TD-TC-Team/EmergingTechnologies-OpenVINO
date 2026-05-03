@@ -86,6 +86,28 @@ const OfflineQueueService = {
   // ─── Queue management ─────────────────────────────────────────────────────
 
   /**
+   * Mark all pending/retrying queue entries as failed.
+   * Called on app startup to discard stale chunks from a previous session
+   * that can no longer be resumed (audio blobs are gone after a page reload).
+   */
+  async clearStaleEntries() {
+    try {
+      const storage = await getStorage();
+      const stale = await storage.query('recording_queue', (r) =>
+        r.status === 'pending' || r.status === 'retrying'
+      );
+      for (const item of stale) {
+        await storage.update('recording_queue', item.id, { status: 'failed' });
+      }
+      if (stale.length > 0) {
+        console.log('[OfflineQueue] Cleared', stale.length, 'stale queue entry/entries from previous session');
+      }
+    } catch (err) {
+      console.warn('[OfflineQueue] clearStaleEntries error:', err);
+    }
+  },
+
+  /**
    * Add a failed chunk to the retry queue.
    *
    * @param {string} chunkRef   — AudioRecording.id

@@ -150,7 +150,7 @@ Each tool solves the same problem, running inference efficiently, but is tuned f
 Inference  =  using a trained model to make predictions
 OpenVINO   =  making those predictions faster and more efficient on Intel hardware
 ```
- ![Alt text](./openvino_workflow.svg)
+ ![Alt text](openvino_workflow.svg)
 ---
 
 ## References

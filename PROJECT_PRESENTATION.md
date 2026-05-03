@@ -13,50 +13,31 @@ Additionally, most hospital workstations lack NVIDIA GPUs:
 
 ---
 
-## 2. The Clinical Use Case
+## 2. The Clinical Use Case — Sof-IA
 
-### Real-World Scenario
+**Sof-IA** is an ambient scribe application for nurses. A nurse speaks at the bedside while the system works in the background: audio is continuously captured, transcribed, and structured into clinical data cards — all on-premise, without any cloud dependency.
+
+### End-to-End Flow
 
 ```
-Nurse speaks clinical observations
+Nurse speaks at the bedside (Sof-IA mobile/web app)
     ↓
-Whisper (ASR) transcribes audio → text
+Audio is recorded in chunks (M4A on Android, WebM in browser)
     ↓
-Phi-3 Mini (SLM) structures the text → SOAP clinical note
+Each chunk is sent to the local FastAPI backend
+    ↓
+Whisper OpenVINO INT8 — transcribes audio → text
+    ↓
+Phi-3 Mini OpenVINO INT8 — extracts structured clinical data from transcript
+    ↓
+Structured cards appear live in the nurse's app
 ```
 
-**Example workflow:**
-
-1. **Nurse dictation (audio):**
-   > "Patient Jane Doe, 45-year-old female, presents with acute lower back pain radiating to the left leg for three days. Pain started after lifting heavy boxes. She rates the pain as 7 out of 10. Vital signs stable. Temperature 36.8°C, blood pressure 128/82. Physical examination reveals tenderness in the lumbar region. Straight leg raise test positive on the left. Recommend ibuprofen 400mg three times daily and physical therapy referral."
-
-2. **Whisper transcription:**
-   The audio is converted to text (preserving medical terminology in English or French)
-
-3. **Phi-3 Mini SOAP note generation:**
-   ```
-   SOAP Note — Jane Doe (45F)
-
-   Subjective:
-   - Chief complaint: Acute lower back pain radiating to left leg (3 days)
-   - Onset: After lifting heavy boxes
-   - Pain severity: 7/10
-
-   Objective:
-   - Vitals: Temp 36.8°C, BP 128/82
-   - Examination: Lumbar tenderness, positive straight leg raise (left)
-
-   Assessment:
-   - Acute lumbar strain with left radiculopathy
-
-   Plan:
-   - Ibuprofen 400mg TID
-   - Physical therapy referral
-   ```
+The app supports an **offline queue**: if the backend is temporarily unavailable, audio chunks are stored locally (IndexedDB on web, SQLite on Android) and retried automatically once the connection is restored.
 
 ### Privacy Compliance
 
-All processing could happen **on-premise** on standard hospital hardware:
+All processing happens **on-premise** on standard hospital hardware:
 - No cloud APIs
 - No external data transmission
 - Full FADP/nLPD compliance
@@ -72,8 +53,8 @@ While PyTorch can run on CPU, it's not optimized for Intel hardware. **OpenVINO*
 
 However, when it comes to running models efficiently on Intel CPUs (inference), PyTorch is not specifically optimized for that hardware. This is where OpenVINO is preferred. It is Intel’s toolkit designed to speed up inference on Intel CPUs by optimizing model execution, reducing latency, and improving performance.
 - **INT8 quantization** (smaller model, faster math)
-- **Graph optimization** 
-- **Hardware-aware execution** 
+- **Graph optimization**
+- **Hardware-aware execution**
 
 **Our hypothesis:** OpenVINO INT8 should deliver 3-5× speedup over baseline PyTorch CPU inference, making real-time clinical transcription and note generation viable on standard hospital PCs.
 
@@ -88,8 +69,8 @@ To validate this, we built a **benchmarking framework** comparing:
 - **Whisper** (medium) — Speech recognition
 - **Phi-3 Mini 4k** — Note generation
 
-> Whisper is an open-source automatic speech recognition (ASR) model developed by OpenAI, capable of transcribing and translating audio across multiple languages. 
-> 
+> Whisper is an open-source automatic speech recognition (ASR) model developed by OpenAI, capable of transcribing and translating audio across multiple languages.
+>
 >Phi-3 Mini is a lightweight large language model (LLM) developed by Microsoft, designed to deliver strong reasoning capabilities in a compact, efficient architecture.
 
 **Metrics collected:**
@@ -146,7 +127,7 @@ WER measured on LibriSpeech real speech (speaker 6930). Both backends produce id
 
 ### Limitations
 
-- **Intel-centric**: no NVIDIA GPU support 
+- **Intel-centric**: no NVIDIA GPU support
 - **Conversion step required**: extra pipeline complexity
 - **Learning curve**: requires understanding IR format and device config
 
@@ -164,11 +145,36 @@ WER measured on LibriSpeech real speech (speaker 6930). Both backends produce id
 
 ## 6. End-to-End Pipeline Implementation
 
+The project is split into two parts: a **Python backend** that handles inference, and a **React Native frontend** (Sof-IA) that nurses interact with.
+
+### Backend — FastAPI Voice Pipeline
+
+The backend exposes a single voice endpoint (`POST /api/voice/transcribe-and-structure`) that accepts an audio chunk, runs it through the two-model pipeline, and returns structured clinical data as JSON.
+
+- **Audio decoding:** pydub + ffmpeg decode WebM/Opus (browser) and M4A/AAC (Android) chunks, then resample to 16 kHz mono for Whisper
+- **Transcription:** Whisper Medium (OpenVINO INT8) converts the audio to text
+- **Structuring:** Phi-3 Mini 4k (OpenVINO INT8) extracts clinical fields (patient info, vitals, observations, plan) from the transcript
+- **Server:** FastAPI + Uvicorn, async, also serves the benchmark dashboard on the same port
+
+### Frontend — Sof-IA Nurse App
+
+The mobile/web app is built with **React Native + Expo** and follows a **Model-View-Presenter (MVP)** architecture, keeping business logic out of UI components.
+
+Key screens:
+- **Mode Selection** — choose between live recording and demo mode
+- **Recording Mode** — microphone button, live recording indicator, audio source badge
+- **Dashboard** — list of structured clinical cards received from the backend
+- **Card Detail** — full view of a single clinical card
+- **Settings** — configure the backend URL and other preferences
+
+The app records audio in 30-second chunks using `expo-av` on Android and the `WebMediaRecorder` API in the browser. Chunks are submitted to the backend as they are recorded. Results stream back as cards that appear on the dashboard in real time.
+
+**Offline resilience:** two local databases (Dexie.js on web, expo-sqlite on Android) act as a write-ahead queue. Chunks that fail to reach the backend are retried automatically.
+
 ---
 
-## 7. Demonstration Results
+## 7. Conclusion
 
+Sof-IA demonstrates that a fully on-premise clinical voice intelligence pipeline is viable on standard Intel CPU hospital hardware. The benchmark results confirm that **OpenVINO INT8 delivers 1.6–5.4× speedups** over baseline PyTorch CPU inference — enough to make real-time transcription and note structuring practical without any GPU or cloud dependency.
 
----
-
-## 8. Conclusion
+The two components — the inference backend and the React Native nurse app — are independently deployable and designed to work together over a simple local HTTP API, making the system straightforward to integrate into existing hospital network environments.

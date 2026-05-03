@@ -12,42 +12,7 @@ This guide shows you how to run performance benchmarks comparing **PyTorch CPU**
 
 ## Quick Start
 
-### Prerequisites Setup
-
-**1. Install Python 3.12**
-
-Download from [python.org](https://www.python.org/downloads/) or use a package manager:
-
-```powershell
-# Verify installation
-python --version  # Should show Python 3.12.x
-```
-
-> **Important:** Python 3.13+ is not supported due to `optimum` compatibility issues
-
-**2. Create and activate virtual environment**
-
-```powershell
-# Navigate to project directory
-
-# Create virtual environment
-python -m venv .venv
-
-# Activate virtual environment
-.\.venv\Scripts\activate
-
-# You should see (.venv) in your command prompt
-```
-
-**3. Install dependencies**
-
-```powershell
-# Install all required packages
-pip install -r requirements.txt
-
-# This installs: OpenVINO, PyTorch, Transformers, FastAPI, etc.
-# Expected time: ~5-10 minutes
-```
+> **Prerequisites and first-time setup** (Python 3.12, venv, `pip install`, model conversion) are covered in the backend section of the [README](./README.md). Complete those steps first, then return here.
 
 ---
 
@@ -387,26 +352,19 @@ python scripts/download_benchmark_audio.py --lang en --samples 5
 
 ## Command Reference
 
+> **First-time setup** (venv creation, dependency install, model conversion) is covered in the [README](./README.md). The commands below assume the environment is already active and models are already converted.
+
 ### Quick Commands Summary
 
 ```powershell
-# 0. Setup (first time only)
-python -m venv .venv
-.\.venv\Scripts\activate
-pip install -r requirements.txt
-
-# 1. Convert models (once)
-python scripts/convert_phi3.py
-python scripts/convert_whisper.py --model medium
-
-# 2. Prepare data (once)
+# Prepare benchmark data (once)
 python scripts/setup_benchmark_data.py
 python scripts/download_benchmark_audio.py --lang en --samples 5
 
-# 3. Run benchmarks (repeatable)
+# Run all benchmarks
 python scripts/run_all_benchmarks.py --warmup 2 --timed 5
 
-# 4. Start web dashboard (alternative)
+# Or start the web dashboard
 uvicorn web.server:app --reload --port 8000
 # Then open http://localhost:8000
 ```

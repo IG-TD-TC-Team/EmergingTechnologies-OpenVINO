@@ -4,6 +4,7 @@ import ContinuousRecordingService from '../services/audio/ContinuousRecordingSer
 import WebRecorderService from '../services/audio/WebRecorderService';
 import SessionService from '../services/SessionService';
 import { getStorage } from '../repositories';
+import { PatientRepository } from '../repositories/PatientRepository';
 
 // ─── Demo script (Alice, nurse-patient consultation only, BP 100/65) ──────────
 // Cards are pushed directly to the view on a timer; no real recording is made.
@@ -111,6 +112,7 @@ export default class PatientDetailsPresenter {
         await this._resolveAudioSource();
         await this._loadSessionCard();
         await this._loadCards();
+        await this.loadPatientFields();
 
         this._unsubRecording = ContinuousRecordingService.subscribe(({ isRecording, connectionStatus }) => {
             this._view.setRecording(isRecording);
@@ -272,6 +274,29 @@ export default class PatientDetailsPresenter {
         } catch (err) {
             console.error('[PatientDetailsPresenter] Failed to toggle recording:', err);
         }
+    }
+
+    // ─── Patient fields (US19) ────────────────────────────────────────────────
+
+    async loadPatientFields() {
+        if (!this._patient?.id) return;
+        try {
+            const repo = new PatientRepository();
+            const record = await repo.get(this._patient.id);
+            this._view.setPatientFields?.(record?.fields ?? []);
+        } catch (_) {
+            this._view.setPatientFields?.([]);
+        }
+    }
+
+    onFieldPress(field, navigation) {
+        navigation.navigate('EditPatient', {
+            patientId:    this._patient?.id ?? '',
+            fieldKey:     field.key,
+            currentValue: Array.isArray(field.value)
+                ? field.value.join(', ')
+                : (field.value ?? ''),
+        });
     }
 
     // ─── Card navigation (US11 = CardDetail, US19 = CardCorrection) ─────────

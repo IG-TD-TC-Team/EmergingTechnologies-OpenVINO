@@ -17,6 +17,12 @@ jest.mock('expo-clipboard', () => ({
     setStringAsync: jest.fn().mockResolvedValue(undefined),
 }));
 
+jest.mock('../../repositories/PatientRepository', () => ({
+    PatientRepository: jest.fn().mockImplementation(() => ({
+        get: jest.fn().mockResolvedValue(null),
+    })),
+}));
+
 jest.mock('../../services/audio/AudioSourceResolver', () => ({
     __esModule: true,
     default: {
@@ -46,6 +52,7 @@ function makeView() {
         setAudioSource:  jest.fn(),
         setMetadata:     jest.fn(),
         setNarrative:    jest.fn(),
+        setIsEdited:     jest.fn(),
         showCopyToast:   jest.fn(),
     };
 }
@@ -187,11 +194,27 @@ describe('onCopyPress', () => {
 // ─── onEditPress ──────────────────────────────────────────────────────────────
 
 describe('onEditPress', () => {
-    it('does not throw — US19 stub', async () => {
+    it('does not throw when navigation is absent', async () => {
         const view = makeView();
         const p = new CardDetailPresenter(view);
         await p.mount({ card: makeCard(), patient: makePatient() });
         expect(() => p.onEditPress()).not.toThrow();
+    });
+
+    it('navigates to EditPatient with correct params when navigation is provided', async () => {
+        const navigation = { navigate: jest.fn() };
+        const view = makeView();
+        const p = new CardDetailPresenter(view);
+        await p.mount({ card: makeCard(), patient: makePatient(), navigation });
+        p.onEditPress();
+        expect(navigation.navigate).toHaveBeenCalledWith(
+            'EditPatient',
+            expect.objectContaining({
+                patientId:    'p-1',
+                fieldKey:     'recent_activity',
+                currentValue: 'Patient reports pain at wound site.',
+            })
+        );
     });
 });
 

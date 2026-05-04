@@ -5,6 +5,7 @@ import { Platform } from 'react-native';
 import BedDetailScreen from '../screens/BedDetailScreen';
 import CardDetailScreen from '../screens/CardDetailScreen';
 import DashboardScreen from '../screens/DashboardScreen';
+import EditPatientScreen from '../screens/EditPatientScreen';
 import LoadingScreen from '../screens/LoadingScreen';
 import ModeSelectionScreen from '../screens/ModeSelectionScreen';
 
@@ -31,7 +32,8 @@ function AppNavigator() {
         <Stack.Screen name="ModeSelection" component={ModeSelectionScreen} />
         <Stack.Screen name="Dashboard"     component={DashboardScreen} />
         <Stack.Screen name="BedDetails"    component={BedDetailScreen}  options={SLIDE_OPTIONS} />
-        <Stack.Screen name="CardDetail"    component={CardDetailScreen} options={SLIDE_OPTIONS} />
+        <Stack.Screen name="CardDetail"    component={CardDetailScreen}  options={SLIDE_OPTIONS} />
+        <Stack.Screen name="EditPatient"   component={EditPatientScreen} options={SLIDE_OPTIONS} />
       </Stack.Navigator>
     </NavigationContainer>
   );

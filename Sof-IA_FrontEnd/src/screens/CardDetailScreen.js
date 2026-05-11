@@ -193,6 +193,7 @@ function CardDetailScreen({ route, navigation }) {
     const [metadata, setMetadata]           = useState({ timeLabel: 'Today –', language: '–' });
     const [narrative, setNarrative]         = useState({ transcript: null, sections: null });
     const [copyToastVisible, setCopyToastVisible] = useState(false);
+    const [isEdited, setIsEdited]           = useState(false);
 
     const presenterRef = useRef(null);
 
@@ -201,6 +202,7 @@ function CardDetailScreen({ route, navigation }) {
             setAudioSource,
             setMetadata,
             setNarrative,
+            setIsEdited,
             showCopyToast: () => {
                 setCopyToastVisible(true);
                 setTimeout(() => setCopyToastVisible(false), 2000);
@@ -208,9 +210,18 @@ function CardDetailScreen({ route, navigation }) {
         };
         const presenter = new CardDetailPresenter(view);
         presenterRef.current = presenter;
-        presenter.mount({ card, patient });
+        presenter.mount({ card, patient, navigation });
         return () => presenter.unmount();
     }, []);
+
+    // Re-check edit status each time this screen comes back into focus
+    // (e.g. after the nurse saves from EditPatientScreen).
+    useEffect(() => {
+        const unsubscribe = navigation.addListener('focus', () => {
+            presenterRef.current?.checkEditStatus();
+        });
+        return unsubscribe;
+    }, [navigation]);
 
     const patientLabel = patient?.bed
         ? `Bed ${patient.bed}${patient?.name ? `: '${patient.name}'` : ''}`
@@ -258,13 +269,16 @@ function CardDetailScreen({ route, navigation }) {
                     <Text style={styles.metaText}>Language: {metadata.language}</Text>
                 </View>
                 <View style={styles.metaRight}>
-                    <TouchableOpacity
-                        style={styles.metaIconBtn}
-                        onPress={() => presenterRef.current?.onEditPress()}
-                        accessibilityLabel="Edit"
-                    >
-                        <SvgXml xml={editPencilSvg} width={20} height={20} />
-                    </TouchableOpacity>
+                    <View style={styles.editBtnWrapper}>
+                        <TouchableOpacity
+                            style={styles.metaIconBtn}
+                            onPress={() => presenterRef.current?.onEditPress()}
+                            accessibilityLabel="Edit"
+                        >
+                            <SvgXml xml={editPencilSvg} width={20} height={20} />
+                        </TouchableOpacity>
+                        {isEdited && <View style={styles.editedDot} />}
+                    </View>
                     <TouchableOpacity
                         style={styles.metaIconBtn}
                         onPress={() => presenterRef.current?.onCopyPress()}
@@ -379,6 +393,20 @@ const styles = StyleSheet.create({
         height: 44,
         alignItems: 'center',
         justifyContent: 'center',
+    },
+    // Wrapper for edit button + edited indicator dot
+    editBtnWrapper: {
+        position: 'relative',
+    },
+    // Orange dot shown when the nurse has manually edited this field
+    editedDot: {
+        position:     'absolute',
+        top:          8,
+        right:        8,
+        width:        8,
+        height:       8,
+        borderRadius: 4,
+        backgroundColor: '#F08C00',
     },
     // ─── Narrative ─────────────────────────────────────────────
     scroll: {

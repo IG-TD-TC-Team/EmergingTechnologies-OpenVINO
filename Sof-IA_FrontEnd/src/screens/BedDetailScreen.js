@@ -56,6 +56,10 @@ const eyeSvg = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmln
   <path d="M12 4.5C7 4.5 2.73 7.61 1 12C2.73 16.39 7 19.5 12 19.5C17 19.5 21.27 16.39 23 12C21.27 7.61 17 4.5 12 4.5ZM12 17C9.24 17 7 14.76 7 12C7 9.24 9.24 7 12 7C14.76 7 17 9.24 17 12C17 14.76 14.76 17 12 17ZM12 9C10.34 9 9 10.34 9 12C9 13.66 10.34 15 12 15C13.66 15 15 13.66 15 12C15 10.34 13.66 9 12 9Z" fill="#1D9E75"/>
 </svg>`;
 
+const chevronRightSvg = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M8.59 16.59L13.17 12L8.59 7.41L10 6L16 12L10 18L8.59 16.59Z" fill="#B4B2A9"/>
+</svg>`;
+
 const micSvg = `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
   <path d="M12 14C13.66 14 15 12.66 15 11V5C15 3.34 13.66 2 12 2C10.34 2 9 3.34 9 5V11C9 12.66 10.34 14 12 14ZM17.91 11C17.42 13.84 14.97 16 12 16C9.03 16 6.58 13.84 6.09 11H4.07C4.57 14.55 7.25 17.44 10.75 17.91V21H13.25V17.91C16.75 17.44 19.43 14.55 19.93 11H17.91Z" fill="white"/>
 </svg>`;
@@ -213,6 +217,42 @@ function PulsingMicButton({ isRecording, disabled, onPress }) {
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
+// ─── PatientInfoSection (US19) ────────────────────────────────────────────────
+
+function PatientInfoSection({ fields, onFieldPress }) {
+    if (!fields || fields.length === 0) return null;
+    return (
+        <View style={styles.patientSection}>
+            <Text style={styles.patientSectionTitle}>Patient Information</Text>
+            {fields.map((field) => (
+                <TouchableOpacity
+                    key={field.key}
+                    style={styles.patientFieldRow}
+                    onPress={() => onFieldPress(field)}
+                    accessibilityLabel={`Edit ${field.label}`}
+                >
+                    <View style={styles.patientFieldContent}>
+                        <Text style={styles.patientFieldLabel}>{field.label}</Text>
+                        <Text
+                            style={[
+                                styles.patientFieldValue,
+                                !!field.edited_by && styles.patientFieldValueEdited,
+                            ]}
+                            numberOfLines={2}
+                        >
+                            {field.value || '—'}
+                        </Text>
+                    </View>
+                    <View style={styles.patientFieldRight}>
+                        {!!field.edited_by && <View style={styles.editedDot} />}
+                        <SvgXml xml={chevronRightSvg} width={16} height={16} />
+                    </View>
+                </TouchableOpacity>
+            ))}
+        </View>
+    );
+}
+
 function BedDetailScreen({ route, navigation }) {
     const { patient, sessionId = null } = route.params ?? {};
 
@@ -220,6 +260,7 @@ function BedDetailScreen({ route, navigation }) {
     const [browserSupported, setBrowserSupported] = useState(true);
     const [sessionCard, setSessionCard] = useState(null);
     const [cards, setCards] = useState([]);
+    const [patientFields, setPatientFields] = useState([]);
 
     const { isRecording, setIsRecording, setConnectionStatus } = useRecordingContext();
 
@@ -233,12 +274,22 @@ function BedDetailScreen({ route, navigation }) {
             setBrowserSupported,
             setSessionCard,
             setCards,
+            setPatientFields,
         };
         const presenter = new PatientDetailsPresenter(view);
         presenterRef.current = presenter;
         presenter.mount({ patient, sessionId });
         return () => presenter.unmount();
     }, []);
+
+    // Reload patient fields each time this screen comes back into focus
+    // (e.g. after nurse saves from EditPatientScreen).
+    useEffect(() => {
+        const unsubscribe = navigation.addListener('focus', () => {
+            presenterRef.current?.loadPatientFields();
+        });
+        return unsubscribe;
+    }, [navigation]);
 
     return (
         <SafeAreaView style={styles.container}>
@@ -281,12 +332,23 @@ function BedDetailScreen({ route, navigation }) {
                 keyExtractor={(item) => item.type}
                 contentContainerStyle={styles.cardList}
                 ListHeaderComponent={
-                    sessionCard ? (
-                        <SessionActiveCard
-                            startedAt={sessionCard.startedAt}
-                            expiresAt={sessionCard.expiresAt}
+                    <>
+                        {sessionCard && (
+                            <SessionActiveCard
+                                startedAt={sessionCard.startedAt}
+                                expiresAt={sessionCard.expiresAt}
+                            />
+                        )}
+                        <PatientInfoSection
+                            fields={patientFields}
+                            onFieldPress={(field) =>
+                                presenterRef.current?.onFieldPress(field, navigation)
+                            }
                         />
-                    ) : null
+                        {patientFields.length > 0 && cards.length > 0 && (
+                            <Text style={styles.sectionLabel}>AI Captured Activity</Text>
+                        )}
+                    </>
                 }
                 ListEmptyComponent={
                     <Text style={styles.emptyText}>
@@ -451,6 +513,69 @@ const styles = StyleSheet.create({
         marginTop: 32,
         paddingHorizontal: 16,
         lineHeight: 20,
+    },
+    // ─── Patient info section (US19) ─────────────────────────
+    patientSection: {
+        backgroundColor: '#FAFAFA',
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: '#E4E2DE',
+        marginBottom: 12,
+        overflow: 'hidden',
+    },
+    patientSectionTitle: {
+        fontSize: 11,
+        fontWeight: '700',
+        color: '#5F5E5A',
+        textTransform: 'uppercase',
+        letterSpacing: 0.6,
+        paddingHorizontal: 14,
+        paddingTop: 12,
+        paddingBottom: 6,
+    },
+    patientFieldRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 14,
+        paddingVertical: 10,
+        borderTopWidth: 0.5,
+        borderTopColor: '#E4E2DE',
+    },
+    patientFieldContent: {
+        flex: 1,
+    },
+    patientFieldLabel: {
+        fontSize: 11,
+        color: '#9E9E9E',
+        marginBottom: 2,
+    },
+    patientFieldValue: {
+        fontSize: 14,
+        color: '#1D1B20',
+        lineHeight: 20,
+    },
+    patientFieldValueEdited: {
+        color: '#F08C00',
+    },
+    patientFieldRight: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        marginLeft: 8,
+    },
+    editedDot: {
+        width: 8,
+        height: 8,
+        borderRadius: 4,
+        backgroundColor: '#F08C00',
+    },
+    sectionLabel: {
+        fontSize: 11,
+        fontWeight: '700',
+        color: '#5F5E5A',
+        textTransform: 'uppercase',
+        letterSpacing: 0.6,
+        marginBottom: 8,
     },
     // ─── Bottom bar ──────────────────────────────────────────
     bottomBar: {

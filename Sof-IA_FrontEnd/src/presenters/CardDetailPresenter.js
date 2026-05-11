@@ -1,18 +1,21 @@
 import * as Clipboard from 'expo-clipboard';
+import { PatientRepository } from '../repositories/PatientRepository';
 import AudioSourceResolver from '../services/audio/AudioSourceResolver';
 
 export default class CardDetailPresenter {
     constructor(view) {
-        this._view = view;
-        this._patient = null;
-        this._card = null;
+        this._view       = view;
+        this._patient    = null;
+        this._card       = null;
+        this._navigation = null;
     }
 
     // ─── Lifecycle ────────────────────────────────────────────────────────────
 
-    async mount({ card, patient }) {
-        this._card = card;
-        this._patient = patient;
+    async mount({ card, patient, navigation = null }) {
+        this._card       = card;
+        this._patient    = patient;
+        this._navigation = navigation;
 
         await this._resolveAudioSource();
         // Use data.timestamp as fallback for vital-sign cards which have no ts_start
@@ -23,6 +26,8 @@ export default class CardDetailPresenter {
             transcript: card.transcript ?? null,
             sections:   card.sections ?? null,
         });
+
+        await this.checkEditStatus();
     }
 
     unmount() {
@@ -76,12 +81,25 @@ export default class CardDetailPresenter {
         this._view.showCopyToast();
     }
 
+    // Queries edit status from PatientRepository and updates the view.
+    // Called on mount and again whenever CardDetailScreen regains focus.
+    async checkEditStatus() {
+        if (!this._patient?.id) return;
+        try {
+            const repo    = new PatientRepository();
+            const record  = await repo.get(this._patient.id);
+            const fieldKey = this._card?.type ?? 'recent_activity';
+            const field   = record?.fields?.find((f) => f.key === fieldKey);
+            this._view.setIsEdited?.(!!field?.edited_by);
+        } catch (_) {}
+    }
+
     onEditPress() {
-        // US19 stub — CardCorrection route not yet registered
-        console.log('[CardDetailPresenter] edit stub — US19', {
-            patientId:    this._patient?.id,
-            fieldKey:     'recent_activity',
-            currentValue: this._card?.transcript,
+        if (!this._navigation) return;
+        this._navigation.navigate('EditPatient', {
+            patientId:    this._patient?.id ?? '',
+            fieldKey:     this._card?.type ?? 'recent_activity',
+            currentValue: this._card?.transcript ?? '',
         });
     }
 

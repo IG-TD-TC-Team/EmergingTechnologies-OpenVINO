@@ -343,6 +343,15 @@ export const migrations: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_safety_info_expires_at ON safety_info(expires_at);
     `,
   },
+  {
+    version: 6,
+    name: 'add_field_edits_to_patients',
+    up: `
+      -- field_edits stores nurse edit metadata as a JSON blob (US19).
+      -- Schema: { [fieldKey]: { original_value, edited_by, edited_at, value? } }
+      ALTER TABLE patients ADD COLUMN field_edits TEXT;
+    `,
+  },
 ];
 
 /**

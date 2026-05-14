@@ -180,5 +180,26 @@ const API = (() => {
      * @returns {Promise<Array<{role: string, content: string}>>}
      */
     getChatHistory: () => _fetch('/api/chat/history'),
+
+    /**
+     * Fetch the curated model catalogue with local disk status per entry.
+     *
+     * @returns {Promise<Array>} Each entry includes id, label, type, status,
+     *   size_gb, compression_options, notes, etc.
+     */
+    fetchCatalogue: () => _fetch('/api/catalogue'),
+
+    /**
+     * Start a background download + OpenVINO conversion job.
+     *
+     * @param {string} catalogueId  - Entry id from the catalogue.
+     * @param {string} compression  - "int8" or "int4".
+     * @returns {Promise<{job_id: string}>} The assigned job UUID.
+     */
+    startModelDownload: (catalogueId, compression, hfToken = '', variant = 'openvino') => _fetch('/api/catalogue/download', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ catalogue_id: catalogueId, compression, hf_token: hfToken, variant }),
+    }),
   });
 })();

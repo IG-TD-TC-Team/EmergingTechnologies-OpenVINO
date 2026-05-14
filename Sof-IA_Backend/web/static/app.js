@@ -43,6 +43,9 @@ createApp({
     /** @type {LogsStore} */
     const logsStore  = new LogsStore();
 
+    /** @type {CatalogueStore} */
+    const catalogueStore = new CatalogueStore();
+
     /**
      * Currently active right-panel tab.
      * @type {Ref} One of `"results"`, `"compare"`, `"chart"`, or `"logs"`.
@@ -203,7 +206,7 @@ createApp({
      * enabled model so the form is ready to use without manual interaction.
      */
     onMounted(async () => {
-      await Promise.all([modelStore.init(), histStore.fetchHistory()]);
+      await Promise.all([modelStore.init(), histStore.fetchHistory(), catalogueStore.fetch()]);
       const first = modelStore.models.value.find(m => m.enabled);
       if (first) benchmark.run.value.modelId = first.id;
     });
@@ -259,6 +262,28 @@ createApp({
 
       // --- logsStore ---
       logsStore,
+
+      // --- catalogueStore ---
+      catalogue:               catalogueStore.entries,
+      catalogueFiltered:       catalogueStore.filteredEntries,
+      catalogueLoading:        catalogueStore.loading,
+      catalogueTypeFilter:     catalogueStore.typeFilter,
+      activeDownloadId:        catalogueStore.activeJobId,
+      activeDownloadEntryId:   catalogueStore.activeEntryId,
+      activeDownloadVariant:   catalogueStore.activeVariant,
+      catalogueJobLog:         catalogueStore.jobLog,
+      catalogueJobProgress:    catalogueStore.jobProgress,
+      catalogueJobError:       catalogueStore.jobError,
+      catalogueJobIsGated:     catalogueStore.jobIsGated,
+      catalogueLastEntry:      catalogueStore.lastActiveEntry,
+      catalogueLogEl:          catalogueStore.logEl,
+      compressionFor:          (entry) => catalogueStore.compressionFor(entry),
+      setCatalogueCompression: (id, val) => catalogueStore.setCompression(id, val),
+      downloadModel:           (id, compression, variant) => catalogueStore.startDownload(id, compression, variant),
+      refreshCatalogue:        () => catalogueStore.fetch(),
+      setCatalogueFilter:      (f) => { catalogueStore.typeFilter.value = f; },
+      catalogueHfToken:        catalogueStore.hfToken,
+      catalogueReadyCount:     computed(() => catalogueStore.entries.value.filter(e => e.status === 'downloaded_ov').length),
 
       // --- helpers ---
       fmt,

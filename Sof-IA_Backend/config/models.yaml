@@ -1,75 +1,84 @@
 benchmark:
   warmup_runs: 2
   timed_runs: 5
-  # Standard inputs — same for every run so results are comparable
   slm_prompt_file: data/benchmark/slm_prompt.txt
   asr_audio_file: data/benchmark/asr_audio.wav
   asr_reference_file: data/benchmark/asr_reference.txt
-
 voice_pipeline:
   asr_model: whisper_openvino
   slm_model: phi3_openvino
   extraction_prompt_file: data/prompts/structured_extraction_prompt.txt
-
 models:
   phi3_pytorch:
     enabled: true
     type: slm
     class: src.slm.phi3_pytorch.Phi3PyTorch
     env_var: PHI3_PYTORCH_MODEL_PATH
-    label: "Phi-3 Mini 4k — PyTorch CPU"
+    label: Phi-3 Mini 4k — PyTorch CPU
     model_path: models/phi3-mini-pytorch
     hub_id: microsoft/Phi-3-mini-4k-instruct
     max_new_tokens: 256
     chat_format: phi3
-
   phi3_openvino:
     enabled: true
     type: slm
     class: src.slm.phi3_openvino.Phi3OpenVINO
     env_var: PHI3_OPENVINO_MODEL_PATH
-    label: "Phi-3 Mini 4k — OpenVINO INT8"
+    label: Phi-3 Mini 4k — OpenVINO INT8
     model_path: models/phi3-mini-4k-int8
     hub_id: microsoft/Phi-3-mini-4k-instruct
     max_new_tokens: 256
     chat_format: phi3
-
   apertus_pytorch:
     enabled: true
     type: slm
     class: src.slm.apertus_pytorch.ApertusPyTorch
     env_var: APERTUS_PYTORCH_MODEL_PATH
-    label: "Apertus 8B Instruct — PyTorch CPU"
+    label: Apertus 8B Instruct — PyTorch CPU
     model_path: models/apertus-8b-pytorch
     hub_id: swiss-ai/Apertus-8B-Instruct-2509
     max_new_tokens: 512
     chat_format: llama3
-
   apertus_openvino:
     enabled: true
     type: slm
     class: src.slm.apertus_openvino.ApertusOpenVINO
     env_var: APERTUS_OPENVINO_MODEL_PATH
-    label: "Apertus 8B Instruct — OpenVINO INT4"
+    label: Apertus 8B Instruct — OpenVINO INT4
     model_path: models/apertus-8b-int4
     hub_id: swiss-ai/Apertus-8B-Instruct-2509
     max_new_tokens: 512
     chat_format: llama3
-
   whisper_pytorch:
     enabled: true
     type: asr
     class: src.asr.whisper_pytorch.WhisperPyTorch
     env_var: WHISPER_PYTORCH_MODEL_PATH
-    label: "Whisper Medium — PyTorch CPU"
-    # HuggingFace hub ID — model is downloaded on first use
+    label: Whisper Medium — PyTorch CPU
     model_path: openai/whisper-medium
-
   whisper_openvino:
     enabled: true
     type: asr
     class: src.asr.whisper_openvino.WhisperOpenVINO
     env_var: WHISPER_OPENVINO_MODEL_PATH
-    label: "Whisper Medium — OpenVINO INT8"
+    label: Whisper Medium — OpenVINO INT8
     model_path: models/whisper-medium-ov
     hub_id: openai/whisper-medium
+  medgemma_4b_it:
+    enabled: true
+    type: slm
+    class: src.slm.generic_openvino.GenericSLMOpenVINO
+    label: MedGemma 1.5 4B — OpenVINO INT8
+    model_path: models/medgemma-4b-it
+    hub_id: google/medgemma-1.5-4b-it
+    max_new_tokens: 512
+    chat_format: gemma
+  medgemma_4b_it_pytorch:
+    enabled: true
+    type: slm
+    class: src.slm.generic_pytorch.GenericSLMPyTorch
+    label: MedGemma 1.5 4B — PyTorch FP32
+    model_path: models/medgemma-4b-it-pytorch
+    hub_id: google/medgemma-1.5-4b-it
+    max_new_tokens: 512
+    chat_format: gemma

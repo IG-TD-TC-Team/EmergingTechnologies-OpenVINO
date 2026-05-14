@@ -5,6 +5,26 @@ Start with:
     uvicorn web.server:app --reload --port 8000
 """
 
+import builtins as _builtins
+import sys as _sys
+
+# Windows default text encoding is cp1252/latin-1; HuggingFace model files use
+# UTF-8 (tokenizer configs often contain characters like em-dash —).
+# Override open() to default to UTF-8 for all text-mode I/O so that optimum /
+# transformers save_pretrained() calls don't crash on non-ASCII content.
+if _sys.platform == 'win32':
+    _real_open = _builtins.open
+
+    def _open_utf8(file, mode='r', buffering=-1, encoding=None, errors=None,
+                   newline=None, closefd=True, opener=None):
+        if 'b' not in str(mode) and encoding is None:
+            encoding = 'utf-8'
+        return _real_open(file, mode, buffering, encoding=encoding,
+                          errors=errors, newline=newline,
+                          closefd=closefd, opener=opener)
+
+    _builtins.open = _open_utf8
+
 import asyncio
 import json
 import logging
@@ -26,6 +46,10 @@ from src.benchmark.factory import ModelFactory
 from src.benchmark.repository import ResultRepository
 from src.benchmark.runner import run_benchmark_async, run_live_slm_async, run_live_asr_async
 from src.logging_config import setup_logging
+from src.model_manager.catalogue import CATALOGUE, CATALOGUE_BY_ID
+from src.model_manager.disk import get_model_status, get_pytorch_status
+from src.model_manager.downloader import download_and_convert, download_pytorch
+from src.model_manager.registry import add_model_to_yaml, add_pytorch_to_yaml
 from src.pipeline.transcribe_and_structure import run_transcribe_and_structure
 from web.middleware import RequestLoggingMiddleware, audit_event, hash_prompt
 
@@ -129,9 +153,12 @@ def serve_index():
 # ---------------------------------------------------------------------------
 
 @app.get("/api/models")
-def list_models(request: Request):
-    """Return all models from config with their type, label, and enabled state."""
-    cfg = request.app.state.config
+def list_models():
+    """Return all models from config with their type, label, and enabled state.
+
+    Reads fresh from disk so newly downloaded models appear without a restart.
+    """
+    cfg = _load_yaml_config()
     models = [
         {
             "id": mid,
@@ -434,6 +461,26 @@ def _format_llama3_chat(system_prompt: str, messages: list[dict]) -> str:
     return "".join(parts)
 
 
+def _format_gemma_chat(system_prompt: str, messages: list[dict]) -> str:
+    """Format a conversation using the Gemma 3 Instruct chat template.
+
+    Gemma 3 has no native system role — the system prompt is prepended to the
+    first user message.  Template tokens: <start_of_turn> / <end_of_turn>.
+    """
+    parts = []
+    for i, msg in enumerate(messages):
+        role = msg["role"]
+        content = msg["content"]
+        if role == "user":
+            if i == 0 and system_prompt:
+                content = f"{system_prompt}\n\n{content}"
+            parts.append(f"<start_of_turn>user\n{content}<end_of_turn>\n")
+        elif role == "assistant":
+            parts.append(f"<start_of_turn>model\n{content}<end_of_turn>\n")
+    parts.append("<start_of_turn>model\n")
+    return "".join(parts)
+
+
 def _format_chat(model_id: str, system_prompt: str, messages: list[dict], cfg: dict) -> str:
     """Dispatch to the correct chat template based on ``chat_format`` in models.yaml.
 
@@ -443,6 +490,8 @@ def _format_chat(model_id: str, system_prompt: str, messages: list[dict], cfg: d
     chat_format = cfg.get("models", {}).get(model_id, {}).get("chat_format", "phi3")
     if chat_format == "llama3":
         return _format_llama3_chat(system_prompt, messages)
+    if chat_format == "gemma":
+        return _format_gemma_chat(system_prompt, messages)
     return _format_phi3_chat(system_prompt, messages)
 
 
@@ -547,6 +596,83 @@ async def transcribe_and_structure(
         nurse_id=nurse_id,
     )
     return JSONResponse(result)
+
+
+# ---------------------------------------------------------------------------
+# Routes — model catalogue
+# ---------------------------------------------------------------------------
+
+class DownloadRequest(PydanticModel):
+    catalogue_id: str
+    compression: str = "int8"
+    hf_token: str = ""
+    variant: str = "openvino"   # "openvino" | "pytorch"
+
+
+@app.get("/api/catalogue")
+def get_catalogue():
+    """Return the curated model catalogue merged with local disk status."""
+    entries = []
+    for item in CATALOGUE:
+        entries.append({
+            **item,
+            "status": get_model_status(item),
+            "pytorch_status": get_pytorch_status(item) if item.get("type") == "slm" else None,
+        })
+    return JSONResponse(entries)
+
+
+@app.post("/api/catalogue/download")
+async def download_model(req: DownloadRequest, background_tasks: BackgroundTasks, request: Request):
+    """Start a background download+conversion job for a catalogue model.
+
+    Returns ``{job_id}``; stream progress via ``GET /api/benchmark/{job_id}/stream``.
+    """
+    entry = CATALOGUE_BY_ID.get(req.catalogue_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail=f"Catalogue entry '{req.catalogue_id}' not found")
+
+    if req.compression not in entry.get("compression_options", ["int8"]):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Compression '{req.compression}' not supported for '{req.catalogue_id}'",
+        )
+
+    job_id = str(uuid.uuid4())
+    client_ip = request.client.host if request.client else "-"
+    jobs.create_job(job_id)
+    audit_event("model_download_started", client_ip, job_id=job_id,
+                catalogue_id=req.catalogue_id, compression=req.compression)
+
+    loop = asyncio.get_running_loop()
+
+    async def _run():
+        jobs.set_running(job_id)
+        channel = QueueProgressChannel(jobs.get_queue(job_id), loop, job_id)
+        try:
+            if req.variant == "pytorch":
+                result = await loop.run_in_executor(
+                    None, download_pytorch, entry, channel, req.hf_token or None
+                )
+                add_pytorch_to_yaml(entry)
+            else:
+                result = await loop.run_in_executor(
+                    None, download_and_convert, entry, req.compression, channel, req.hf_token or None
+                )
+                add_model_to_yaml(entry, req.compression)
+            channel.send_progress("Model registered in config/models.yaml")
+            jobs.set_done(job_id, result)
+            channel.send_done(result)
+        except Exception as exc:
+            logger.exception("model_download_failed catalogue_id=%s", req.catalogue_id,
+                             extra={"job_id": job_id})
+            jobs.set_failed(job_id, str(exc))
+            audit_event("model_download_failed", client_ip, job_id=job_id,
+                        catalogue_id=req.catalogue_id, error=str(exc))
+            channel.send_error(str(exc))
+
+    background_tasks.add_task(_run)
+    return JSONResponse({"job_id": job_id})
 
 
 # ---------------------------------------------------------------------------

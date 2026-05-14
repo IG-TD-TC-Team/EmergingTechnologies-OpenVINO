@@ -246,3 +246,263 @@ tr:hover td { background: #243044; }
   font-size: 1.1rem;
   letter-spacing: .02em;
 }
+
+/* ── Model catalogue ────────────────────────────────────────────────── */
+
+.catalogue-page {
+  padding: 1rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+/* Header bar */
+.catalogue-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.catalogue-header-left {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.catalogue-header-right {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+}
+
+.hf-token-input {
+  width: 200px;
+  background: #0f172a;
+  border: 1px solid #475569;
+  border-radius: .35rem;
+  color: #e2e8f0;
+  padding: .35rem .6rem;
+  font-size: .78rem;
+}
+
+.catalogue-stat {
+  font-size: .85rem;
+}
+
+/* Filter tabs */
+.catalogue-filter-tabs {
+  display: flex;
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: .375rem;
+  overflow: hidden;
+}
+
+.catalogue-filter-btn {
+  background: transparent;
+  border: none;
+  color: #64748b;
+  padding: .3rem .75rem;
+  font-size: .78rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background .12s, color .12s;
+}
+
+.catalogue-filter-btn:hover { background: #1e293b; color: #e2e8f0; }
+
+.catalogue-filter-btn.active {
+  background: #1e3a5f;
+  color: #93c5fd;
+}
+
+/* Download progress banner */
+.catalogue-progress-banner {
+  background: #1e293b;
+  border: 1px solid #1e3a5f;
+  border-radius: .5rem;
+  padding: .75rem 1rem;
+}
+
+.catalogue-progress-banner-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: .25rem;
+}
+
+/* Model grid */
+.model-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: .75rem;
+}
+
+/* Cards */
+.model-card {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-left: 3px solid #334155;
+  border-radius: .5rem;
+  padding: .9rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: .35rem;
+  min-height: 148px;
+  transition: border-color .15s, opacity .15s, transform .1s;
+}
+
+.model-card:hover { border-color: #475569; border-left-color: #475569; transform: translateY(-1px); }
+
+.model-card.available {
+  opacity: 0.6;
+  border-left-color: #334155;
+}
+
+.model-card.available:hover { opacity: 0.85; }
+
+.model-card.downloaded_ov {
+  border-left-color: #2563eb;
+  opacity: 1;
+}
+
+.model-card.downloaded_ov:hover { border-left-color: #3b82f6; }
+
+@keyframes catalogue-pulse {
+  0%, 100% { border-left-color: #1e3a5f; }
+  50%       { border-left-color: #3b82f6; }
+}
+.model-card.downloading {
+  animation: catalogue-pulse 1.2s ease-in-out infinite;
+  border-color: #1e3a5f;
+  opacity: 0.9;
+}
+
+.model-card-header {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+}
+
+.model-card-title {
+  font-size: .85rem;
+  font-weight: 600;
+  color: #e2e8f0;
+  line-height: 1.35;
+}
+
+.model-card-notes {
+  font-size: .72rem;
+  color: #94a3b8;
+}
+
+.model-card-meta {
+  display: flex;
+  align-items: center;
+  gap: .3rem;
+  font-size: .7rem;
+  color: #475569;
+}
+
+.mc-sep { color: #334155; }
+
+.model-card-hub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 120px;
+}
+
+.model-card-actions {
+  display: flex;
+  gap: .4rem;
+  align-items: center;
+  margin-top: .1rem;
+}
+
+/* Status dot */
+.mc-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.mc-dot-ready { background: #22c55e; box-shadow: 0 0 5px #22c55e66; }
+.mc-dot-busy  { background: #3b82f6; animation: dot-pulse 1s ease-in-out infinite; }
+.mc-dot-off   { background: #334155; }
+
+@keyframes dot-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: .35; }
+}
+
+/* Compression selector */
+.mc-compression-select {
+  width: auto;
+  padding: .2rem .35rem;
+  font-size: .72rem;
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: .3rem;
+  color: #94a3b8;
+}
+
+/* Spinner inside badge */
+@keyframes mc-spin { to { transform: rotate(360deg); } }
+.mc-spinner {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border: 2px solid #334155;
+  border-top-color: #93c5fd;
+  border-radius: 50%;
+  animation: mc-spin .7s linear infinite;
+  vertical-align: middle;
+  margin-right: 3px;
+}
+
+.gated-error-box {
+  background: rgba(239,68,68,.08);
+  border: 1px solid rgba(239,68,68,.3);
+  border-radius: .4rem;
+  padding: .6rem .75rem;
+}
+
+.gated-error-links {
+  display: flex;
+  gap: .5rem;
+  flex-wrap: wrap;
+  margin-top: .4rem;
+}
+
+.gated-error-links .btn {
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+}
+
+.badge-downloaded {
+  background: #14532d;
+  color: #6ee7b7;
+  font-size: .68rem;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.badge-downloading {
+  display: flex;
+  align-items: center;
+  background: #1e3a5f;
+  color: #93c5fd;
+  font-size: .68rem;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+}

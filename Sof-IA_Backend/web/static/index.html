@@ -6,7 +6,7 @@
   <title>OpenVino Benchmark Dashboard</title>
   <script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.prod.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-  <link rel="stylesheet" href="/static/app.css" />
+  <link rel="stylesheet" href="/static/app.css?v=5" />
   <!--
     Script load order matters in CDN (non-module) mode:
       1. Vue + Chart.js globals
@@ -40,9 +40,10 @@
 
   <!-- Mode navigation -->
   <nav class="mode-nav">
-    <button class="mode-btn" :class="{active: mode==='benchmark'}" @click="mode='benchmark'">Benchmark</button>
-    <button class="mode-btn" :class="{active: mode==='chat'}"      @click="mode='chat'">Chat</button>
+    <button class="mode-btn" :class="{active: mode==='benchmark'}"    @click="mode='benchmark'">Benchmark</button>
+    <button class="mode-btn" :class="{active: mode==='chat'}"          @click="mode='chat'">Chat</button>
     <button class="mode-btn" :class="{active: mode==='transcription'}" @click="mode='transcription'">Transcription</button>
+    <button class="mode-btn" :class="{active: mode==='models'}"        @click="mode='models'; refreshCatalogue()">Models</button>
   </nav>
 
   <!-- ================================================================
@@ -473,16 +474,211 @@
     Transcription — coming soon
   </div>
 
+  <!-- ================================================================
+       MODE: Models
+       ================================================================ -->
+  <div v-else-if="mode==='models'" class="catalogue-page">
+
+    <!-- ── Header bar ──────────────────────────────────────────────── -->
+    <div class="catalogue-header">
+      <div class="catalogue-header-left">
+        <h2 style="margin:0;font-size:1rem;">Model Catalogue</h2>
+        <span class="catalogue-stat">
+          <span :style="{color: catalogueReadyCount > 0 ? '#6ee7b7' : '#64748b'}">
+            {{ catalogueReadyCount }}
+          </span>
+          <span style="color:#64748b;">&nbsp;/ {{ catalogue.length }} on disk</span>
+        </span>
+      </div>
+      <div class="catalogue-header-right">
+        <input
+          type="password"
+          v-model="catalogueHfToken"
+          placeholder="HF Token (gated models)"
+          autocomplete="off"
+          class="hf-token-input"
+          title="HuggingFace access token — required for gated models like MedGemma or LLaMA"
+        />
+        <div class="catalogue-filter-tabs">
+          <button class="catalogue-filter-btn" :class="{active: catalogueTypeFilter==='all'}"   @click="setCatalogueFilter('all')">All</button>
+          <button class="catalogue-filter-btn" :class="{active: catalogueTypeFilter==='asr'}"   @click="setCatalogueFilter('asr')">ASR</button>
+          <button class="catalogue-filter-btn" :class="{active: catalogueTypeFilter==='slm'}"   @click="setCatalogueFilter('slm')">SLM</button>
+        </div>
+        <button class="btn btn-secondary btn-sm" :disabled="catalogueLoading || !!activeDownloadId" @click="refreshCatalogue">
+          {{ catalogueLoading ? 'Loading…' : 'Refresh' }}
+        </button>
+      </div>
+    </div>
+
+    <!-- ── Download progress banner (only when a job is active) ───── -->
+    <div class="catalogue-progress-banner" v-if="catalogueJobLog.length">
+      <div class="catalogue-progress-banner-top">
+        <span style="font-size:.8rem;font-weight:600;color:#93c5fd;">
+          {{ catalogueJobError ? 'Failed' : catalogueJobProgress === 100 ? 'Complete' : 'Converting…' }}
+          &nbsp;
+          <span style="font-weight:400;color:#94a3b8;">{{ activeDownloadEntryId }}</span>
+        </span>
+        <span style="font-size:.75rem;color:#64748b;">{{ catalogueJobProgress }}%</span>
+      </div>
+      <div class="progress-bar-wrap" style="margin:.4rem 0;">
+        <div class="progress-bar-fill" :style="{width: catalogueJobProgress + '%',
+          background: catalogueJobError ? '#ef4444' : catalogueJobProgress === 100 ? '#22c55e' : '#3b82f6'}">
+        </div>
+      </div>
+      <div class="log" ref="catalogueLogEl" style="max-height:120px;">
+        <div v-for="(line, i) in catalogueJobLog" :key="i">{{ line }}</div>
+      </div>
+      <div v-if="catalogueJobError" style="margin-top:.4rem;">
+        <template v-if="catalogueJobIsGated && catalogueLastEntry">
+          <div class="gated-error-box">
+            <div style="font-size:.8rem;font-weight:600;color:#fca5a5;margin-bottom:.5rem;">
+              Gated model — HuggingFace access required
+            </div>
+            <div class="gated-error-links">
+              <a
+                :href="'https://huggingface.co/' + catalogueLastEntry.hub_id"
+                target="_blank"
+                rel="noopener"
+                class="btn btn-primary btn-sm"
+              >1. Accept model terms &rarr;</a>
+              <a
+                href="https://huggingface.co/settings/tokens"
+                target="_blank"
+                rel="noopener"
+                class="btn btn-secondary btn-sm"
+              >2. Get / check your token &rarr;</a>
+            </div>
+            <div style="font-size:.72rem;color:#94a3b8;margin-top:.5rem;">
+              Then paste your token in the HF Token field above and click Download &amp; Convert again.
+            </div>
+          </div>
+        </template>
+        <template v-else>
+          <div style="font-size:.75rem;color:#fca5a5;white-space:pre-line;line-height:1.6;">{{ catalogueJobError }}</div>
+        </template>
+      </div>
+      <div v-if="catalogueJobProgress === 100 && !catalogueJobError"
+           style="margin-top:.4rem;font-size:.75rem;color:#6ee7b7;">
+        Model added. It now appears in the Benchmark &amp; Chat tabs.
+      </div>
+    </div>
+
+    <!-- ── Empty / loading states ──────────────────────────────────── -->
+    <div v-if="catalogueLoading && catalogue.length === 0" class="empty" style="padding:3rem;text-align:center;">
+      Loading catalogue…
+    </div>
+    <div v-else-if="!catalogueLoading && catalogue.length === 0" class="empty" style="padding:3rem;text-align:center;">
+      No models in catalogue. Check server logs.
+    </div>
+
+    <!-- ── Model grid ──────────────────────────────────────────────── -->
+    <div v-else class="model-grid">
+      <div
+        v-for="entry in catalogueFiltered"
+        :key="entry.id"
+        class="model-card"
+        :class="entry.status"
+      >
+        <!-- Status stripe (left border color handled by CSS class) -->
+
+        <!-- Header row: type badge + status indicator -->
+        <div class="model-card-header">
+          <span class="model-type-badge" :class="entry.type === 'slm' ? 'badge-slm' : 'badge-asr'">
+            {{ entry.type.toUpperCase() }}
+          </span>
+          <span v-if="entry.status === 'downloaded_ov'" class="mc-status-dot mc-dot-ready" title="On disk"></span>
+          <span v-else-if="entry.status === 'downloading'" class="mc-status-dot mc-dot-busy" title="Converting…"></span>
+          <span v-else class="mc-status-dot mc-dot-off" title="Not downloaded"></span>
+        </div>
+
+        <!-- Title -->
+        <div class="model-card-title">{{ entry.label }}</div>
+
+        <!-- Notes -->
+        <div class="model-card-notes">{{ entry.notes }}</div>
+
+        <!-- Spacer pushes action row to bottom -->
+        <div style="flex:1;"></div>
+
+        <!-- Meta line -->
+        <div class="model-card-meta">
+          <span>{{ entry.size_gb }} GB</span>
+          <span class="mc-sep">·</span>
+          <span>{{ compressionFor(entry).toUpperCase() }}</span>
+          <span class="mc-sep">·</span>
+          <span class="model-card-hub" :title="entry.hub_id">{{ entry.hub_id.split('/')[1] }}</span>
+        </div>
+
+        <!-- Action row — OpenVINO -->
+        <div class="model-card-actions">
+          <template v-if="entry.status === 'downloaded_ov'">
+            <span class="badge-downloaded">&#10003; OpenVINO</span>
+          </template>
+          <template v-else-if="entry.status === 'downloading' && activeDownloadVariant === 'openvino'">
+            <span class="badge-downloading">
+              <span class="mc-spinner"></span> Converting…
+            </span>
+          </template>
+          <template v-else>
+            <select
+              v-if="entry.compression_options.length > 1"
+              :disabled="!!activeDownloadId"
+              :value="compressionFor(entry)"
+              @change="setCatalogueCompression(entry.id, $event.target.value)"
+              class="mc-compression-select"
+            >
+              <option v-for="opt in entry.compression_options" :key="opt" :value="opt">
+                {{ opt.toUpperCase() }}
+              </option>
+            </select>
+            <button
+              class="btn btn-primary btn-sm"
+              style="flex:1;"
+              :disabled="!!activeDownloadId"
+              @click="downloadModel(entry.id, compressionFor(entry), 'openvino')"
+            >
+              OpenVINO
+            </button>
+          </template>
+        </div>
+
+        <!-- Action row — PyTorch (SLM only) -->
+        <div v-if="entry.type === 'slm'" class="model-card-actions" style="margin-top:.3rem;">
+          <template v-if="entry.pytorch_status === 'downloaded'">
+            <span class="badge-downloaded" style="background:#1e3a5f;color:#93c5fd;">&#10003; PyTorch</span>
+          </template>
+          <template v-else-if="entry.pytorch_status === 'downloading' && activeDownloadVariant === 'pytorch'">
+            <span class="badge-downloading">
+              <span class="mc-spinner"></span> Downloading…
+            </span>
+          </template>
+          <template v-else>
+            <button
+              class="btn btn-secondary btn-sm"
+              style="flex:1;"
+              :disabled="!!activeDownloadId"
+              @click="downloadModel(entry.id, 'int8', 'pytorch')"
+            >
+              PyTorch (CPU baseline)
+            </button>
+          </template>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
 </div>
 
-<script src="/static/api.js"></script>
-<script src="/static/composables/models.js"></script>
-<script src="/static/composables/benchmark.js"></script>
-<script src="/static/composables/history.js"></script>
-<script src="/static/composables/compare.js"></script>
-<script src="/static/composables/chart.js"></script>
-<script src="/static/composables/logs.js"></script>
-<script src="/static/composables/chat.js"></script>
-<script src="/static/app.js"></script>
+<script src="/static/api.js?v=5"></script>
+<script src="/static/composables/models.js?v=5"></script>
+<script src="/static/composables/benchmark.js?v=5"></script>
+<script src="/static/composables/history.js?v=5"></script>
+<script src="/static/composables/compare.js?v=5"></script>
+<script src="/static/composables/chart.js?v=5"></script>
+<script src="/static/composables/logs.js?v=5"></script>
+<script src="/static/composables/chat.js?v=5"></script>
+<script src="/static/composables/catalogue.js?v=5"></script>
+<script src="/static/app.js?v=5"></script>
 </body>
 </html>

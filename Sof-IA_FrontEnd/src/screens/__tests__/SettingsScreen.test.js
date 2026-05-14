@@ -13,6 +13,7 @@ const mockGoBack = jest.fn();
 const mockNavigation = {
   goBack: mockGoBack,
   navigate: jest.fn(),
+  canGoBack: jest.fn().mockReturnValue(true),
 };
 
 // Android capabilities
@@ -168,16 +169,14 @@ describe('SettingsScreen', () => {
       expect(getByTextWeb('Platform Information')).toBeTruthy();
     });
 
-    it('should always show general settings section', () => {
+    it('should always show server connection section', () => {
       const { getByText: getByTextAndroid } = render(
         <CapabilitiesProvider value={androidCapabilities}>
           <SettingsScreen navigation={mockNavigation} />
         </CapabilitiesProvider>
       );
 
-      expect(getByTextAndroid('General')).toBeTruthy();
-      expect(getByTextAndroid('Language')).toBeTruthy();
-      expect(getByTextAndroid('Privacy Settings')).toBeTruthy();
+      expect(getByTextAndroid('Server Connection')).toBeTruthy();
 
       const { getByText: getByTextWeb } = render(
         <CapabilitiesProvider value={webCapabilities}>
@@ -185,9 +184,7 @@ describe('SettingsScreen', () => {
         </CapabilitiesProvider>
       );
 
-      expect(getByTextWeb('General')).toBeTruthy();
-      expect(getByTextWeb('Language')).toBeTruthy();
-      expect(getByTextWeb('Privacy Settings')).toBeTruthy();
+      expect(getByTextWeb('Server Connection')).toBeTruthy();
     });
   });
 
@@ -288,22 +285,20 @@ describe('SettingsScreen', () => {
         </CapabilitiesProvider>
       );
 
-      // Android should have: Platform Info, File Management, Background Sync, General
-      // Web should have: Platform Info, Offline Mode, General
-      // So Android has 4 sections, Web has 3 sections
+      // Android should have: Platform Info, Server Connection, File Management, Background Sync
+      // Web should have: Platform Info, Server Connection, Offline Mode
 
-      // We can verify this by counting unique section titles
       const androidSections = [
         'Platform Information',
+        'Server Connection',
         'File Management',
         'Background Sync',
-        'General',
       ];
 
       const webSections = [
         'Platform Information',
+        'Server Connection',
         'Offline Mode',
-        'General',
       ];
 
       androidSections.forEach((section) => {

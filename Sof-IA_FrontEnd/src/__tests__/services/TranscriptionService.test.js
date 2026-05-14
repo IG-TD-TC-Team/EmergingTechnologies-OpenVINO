@@ -34,7 +34,7 @@ jest.mock('../../services/SessionService', () => ({
     default: { getActiveShift: jest.fn() },
 }));
 
-jest.mock('../../services/audio/OfflineQueueService', () => ({
+jest.mock('../../services/queue/OfflineQueueManager', () => ({
     __esModule: true,
     default: { enqueue: jest.fn().mockResolvedValue(undefined) },
 }));
@@ -60,7 +60,7 @@ jest.mock('uuid', () => ({ v4: () => 'seg-uuid-1' }));
 
 import TranscriptionService from '../../services/TranscriptionService';
 import SessionService       from '../../services/SessionService';
-import OfflineQueueService  from '../../services/audio/OfflineQueueService';
+import OfflineQueueManager  from '../../services/queue/OfflineQueueManager';
 import { getStorage }       from '../../repositories';
 import { TRANSCRIPTION_FIXTURE } from '../helpers/transcription-fixture';
 
@@ -217,7 +217,7 @@ describe('TranscriptionService', () => {
         it('does NOT enqueue to OfflineQueueService on success', async () => {
             mockFetchOk();
             await TranscriptionService.processChunk(WEB_CHUNK);
-            expect(OfflineQueueService.enqueue).not.toHaveBeenCalled();
+            expect(OfflineQueueManager.enqueue).not.toHaveBeenCalled();
         });
     });
 
@@ -248,7 +248,7 @@ describe('TranscriptionService', () => {
             mockFetchFail(500);
             await TranscriptionService.processChunk(WEB_CHUNK);
 
-            expect(OfflineQueueService.enqueue).toHaveBeenCalledWith(
+            expect(OfflineQueueManager.enqueue).toHaveBeenCalledWith(
                 WEB_CHUNK.recordingId,
                 WEB_CHUNK.sessionId
             );
@@ -258,7 +258,7 @@ describe('TranscriptionService', () => {
             mockFetchThrow('Failed to fetch');
             await TranscriptionService.processChunk(WEB_CHUNK);
 
-            expect(OfflineQueueService.enqueue).toHaveBeenCalledWith(
+            expect(OfflineQueueManager.enqueue).toHaveBeenCalledWith(
                 WEB_CHUNK.recordingId,
                 WEB_CHUNK.sessionId
             );

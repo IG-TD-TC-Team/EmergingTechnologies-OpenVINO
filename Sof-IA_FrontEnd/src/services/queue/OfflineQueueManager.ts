@@ -331,6 +331,37 @@ class OfflineQueueManagerClass {
     return { pendingCount, failedCount, storageSizeBytes, percentFull };
   }
 
+  /**
+   * Delete all queue entries for the given session and notify subscribers.
+   * Emits queue:synced so SyncStatusIndicator refreshes and clears the red
+   * "N chunks failed" pill immediately after a force-delete shift end.
+   */
+  async clearSession(sessionId: string): Promise<void> {
+    const repo = await this._getRepo();
+    await repo.clearBySession(sessionId);
+    this._emit('queue:synced', { syncedCount: 0 });
+  }
+
+  /**
+   * Return queue metrics scoped to a single session.
+   * Used by the end-shift gate so entries from other sessions (including ones
+   * re-enqueued by a concurrent retryPending loop) never block a clean shift end.
+   */
+  async getSessionStats(sessionId: string): Promise<QueueStats> {
+    const repo = await this._getRepo();
+    const [all, storageSizeBytes] = await Promise.all([
+      repo.getAll(),
+      repo.getStorageSizeBytes(),
+    ]);
+
+    const session = all.filter((e) => e.session_id === sessionId);
+    const pendingCount = session.filter((e) => e.status === 'pending').length;
+    const failedCount  = session.filter((e) => e.status === 'failed').length;
+    const percentFull  = Math.min(storageSizeBytes / MAX_BUFFER_BYTES, 1);
+
+    return { pendingCount, failedCount, storageSizeBytes, percentFull };
+  }
+
   // ─── Private helpers ───────────────────────────────────────────────────────
 
   private async _checkStorageWarning(repo: IOfflineQueueRepository): Promise<void> {

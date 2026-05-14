@@ -217,42 +217,6 @@ function PulsingMicButton({ isRecording, disabled, onPress }) {
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
-// ─── PatientInfoSection (US19) ────────────────────────────────────────────────
-
-function PatientInfoSection({ fields, onFieldPress }) {
-    if (!fields || fields.length === 0) return null;
-    return (
-        <View style={styles.patientSection}>
-            <Text style={styles.patientSectionTitle}>Patient Information</Text>
-            {fields.map((field) => (
-                <TouchableOpacity
-                    key={field.key}
-                    style={styles.patientFieldRow}
-                    onPress={() => onFieldPress(field)}
-                    accessibilityLabel={`Edit ${field.label}`}
-                >
-                    <View style={styles.patientFieldContent}>
-                        <Text style={styles.patientFieldLabel}>{field.label}</Text>
-                        <Text
-                            style={[
-                                styles.patientFieldValue,
-                                !!field.edited_by && styles.patientFieldValueEdited,
-                            ]}
-                            numberOfLines={2}
-                        >
-                            {field.value || '—'}
-                        </Text>
-                    </View>
-                    <View style={styles.patientFieldRight}>
-                        {!!field.edited_by && <View style={styles.editedDot} />}
-                        <SvgXml xml={chevronRightSvg} width={16} height={16} />
-                    </View>
-                </TouchableOpacity>
-            ))}
-        </View>
-    );
-}
-
 function BedDetailScreen({ route, navigation }) {
     const { patient, sessionId = null } = route.params ?? {};
 
@@ -260,7 +224,6 @@ function BedDetailScreen({ route, navigation }) {
     const [browserSupported, setBrowserSupported] = useState(true);
     const [sessionCard, setSessionCard] = useState(null);
     const [cards, setCards] = useState([]);
-    const [patientFields, setPatientFields] = useState([]);
 
     const { isRecording, setIsRecording, setConnectionStatus } = useRecordingContext();
 
@@ -274,22 +237,12 @@ function BedDetailScreen({ route, navigation }) {
             setBrowserSupported,
             setSessionCard,
             setCards,
-            setPatientFields,
         };
         const presenter = new PatientDetailsPresenter(view);
         presenterRef.current = presenter;
         presenter.mount({ patient, sessionId });
         return () => presenter.unmount();
     }, []);
-
-    // Reload patient fields each time this screen comes back into focus
-    // (e.g. after nurse saves from EditPatientScreen).
-    useEffect(() => {
-        const unsubscribe = navigation.addListener('focus', () => {
-            presenterRef.current?.loadPatientFields();
-        });
-        return unsubscribe;
-    }, [navigation]);
 
     return (
         <SafeAreaView style={styles.container}>
@@ -328,27 +281,17 @@ function BedDetailScreen({ route, navigation }) {
 
             {/* Card list */}
             <FlatList
+                style={{ flex: 1 }}
                 data={cards}
                 keyExtractor={(item) => item.type}
                 contentContainerStyle={styles.cardList}
                 ListHeaderComponent={
-                    <>
-                        {sessionCard && (
-                            <SessionActiveCard
-                                startedAt={sessionCard.startedAt}
-                                expiresAt={sessionCard.expiresAt}
-                            />
-                        )}
-                        <PatientInfoSection
-                            fields={patientFields}
-                            onFieldPress={(field) =>
-                                presenterRef.current?.onFieldPress(field, navigation)
-                            }
+                    sessionCard ? (
+                        <SessionActiveCard
+                            startedAt={sessionCard.startedAt}
+                            expiresAt={sessionCard.expiresAt}
                         />
-                        {patientFields.length > 0 && cards.length > 0 && (
-                            <Text style={styles.sectionLabel}>AI Captured Activity</Text>
-                        )}
-                    </>
+                    ) : null
                 }
                 ListEmptyComponent={
                     <Text style={styles.emptyText}>
@@ -513,69 +456,6 @@ const styles = StyleSheet.create({
         marginTop: 32,
         paddingHorizontal: 16,
         lineHeight: 20,
-    },
-    // ─── Patient info section (US19) ─────────────────────────
-    patientSection: {
-        backgroundColor: '#FAFAFA',
-        borderRadius: 12,
-        borderWidth: 1,
-        borderColor: '#E4E2DE',
-        marginBottom: 12,
-        overflow: 'hidden',
-    },
-    patientSectionTitle: {
-        fontSize: 11,
-        fontWeight: '700',
-        color: '#5F5E5A',
-        textTransform: 'uppercase',
-        letterSpacing: 0.6,
-        paddingHorizontal: 14,
-        paddingTop: 12,
-        paddingBottom: 6,
-    },
-    patientFieldRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingHorizontal: 14,
-        paddingVertical: 10,
-        borderTopWidth: 0.5,
-        borderTopColor: '#E4E2DE',
-    },
-    patientFieldContent: {
-        flex: 1,
-    },
-    patientFieldLabel: {
-        fontSize: 11,
-        color: '#9E9E9E',
-        marginBottom: 2,
-    },
-    patientFieldValue: {
-        fontSize: 14,
-        color: '#1D1B20',
-        lineHeight: 20,
-    },
-    patientFieldValueEdited: {
-        color: '#F08C00',
-    },
-    patientFieldRight: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 6,
-        marginLeft: 8,
-    },
-    editedDot: {
-        width: 8,
-        height: 8,
-        borderRadius: 4,
-        backgroundColor: '#F08C00',
-    },
-    sectionLabel: {
-        fontSize: 11,
-        fontWeight: '700',
-        color: '#5F5E5A',
-        textTransform: 'uppercase',
-        letterSpacing: 0.6,
-        marginBottom: 8,
     },
     // ─── Bottom bar ──────────────────────────────────────────
     bottomBar: {

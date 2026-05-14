@@ -10,7 +10,7 @@
  *   buildCards — safety info from card table rows (always flagged)
  *   buildCards — fallback to patient.allergies / patient.notes when tables empty
  *   buildCards — fixture-data compatibility (MEDICATIONS_FIXTURE, VITAL_SIGNS_FIXTURE, …)
- *   _loadSessionCard — expires_at used / computed from started_at + 14h
+ *   _loadSessionCard — expiry always computed as started_at + 12h
  *   onCardPress — routes to CardDetail (non-flagged) or CardCorrection (flagged)
  *   onMicPress  — toggleRecording with patient context
  *   unmount     — clears poll interval and unsubscribes recording
@@ -293,7 +293,10 @@ describe('buildCards', () => {
         });
         const cards = buildCards([], [], [vital], [], [], makePatient());
         const vsCard = cards.find((c) => c.type === 'vital_signs');
-        expect(vsCard.preview).toMatch(/^BP 120\/80 — HR 72 — \d{1,2}:\d{2}$/);
+        // toLocaleTimeString output varies by locale (12h vs 24h) — assert parts, not full format
+        expect(vsCard.preview).toContain('BP 120/80');
+        expect(vsCard.preview).toContain('HR 72');
+        expect(vsCard.preview).toMatch(/\d{1,2}:\d{2}/);
     });
 
     it('vital_signs: temperature and spo2 included when non-null', () => {
@@ -580,31 +583,18 @@ describe('buildCards', () => {
 // ─── _loadSessionCard ─────────────────────────────────────────────────────────
 
 describe('_loadSessionCard', () => {
-    it('uses expires_at from session when present', async () => {
+    it('computes expiresAt as started_at + 12h', async () => {
         SessionService.getActiveShift.mockResolvedValue({
             started_at: '2026-04-20T07:00:00.000Z',
-            expires_at: '2026-04-20T21:00:00.000Z',
-        });
-        const view = makeView();
-        const p = new PatientDetailsPresenter(view);
-        await p._loadSessionCard();
-        expect(view.setSessionCard).toHaveBeenCalledWith({
-            startedAt: '2026-04-20T07:00:00.000Z',
-            expiresAt: '2026-04-20T21:00:00.000Z',
-        });
-    });
-
-    it('falls back to started_at + 14h when expires_at is null', async () => {
-        SessionService.getActiveShift.mockResolvedValue({
-            started_at: '2026-04-20T07:00:00.000Z',
-            expires_at: null,
+            expires_at: '2026-04-21T07:00:00.000Z', // DB retention TTL — ignored for display
         });
         const view = makeView();
         const p = new PatientDetailsPresenter(view);
         await p._loadSessionCard();
         const call = view.setSessionCard.mock.calls[0][0];
-        const expected = new Date('2026-04-20T07:00:00.000Z').getTime() + 14 * 60 * 60 * 1000;
+        const expected = new Date('2026-04-20T07:00:00.000Z').getTime() + 12 * 60 * 60 * 1000;
         expect(new Date(call.expiresAt).getTime()).toBe(expected);
+        expect(call.startedAt).toBe('2026-04-20T07:00:00.000Z');
     });
 
     it('calls setSessionCard(null) when no active session', async () => {
@@ -632,7 +622,8 @@ describe('onMicPress', () => {
     it('calls toggleRecording with sessionId and patient.id', async () => {
         SessionService.getActiveSessionId.mockResolvedValue('session-abc');
 
-        const patient = makePatient({ id: 'p-1' });
+        // Non-Alice name to avoid triggering demo mode (isDemo = patient.name === 'Alice')
+        const patient = makePatient({ id: 'p-1', name: 'Bob' });
         const view = makeView();
         const p = new PatientDetailsPresenter(view);
         // mount() sets this._patient so onMicPress has the context
@@ -649,7 +640,7 @@ describe('onMicPress', () => {
     it('passes null patientId when patient has no id', async () => {
         SessionService.getActiveSessionId.mockResolvedValue('session-abc');
 
-        const patient = makePatient({ id: null });
+        const patient = makePatient({ id: null, name: 'Bob' });
         const view = makeView();
         const p = new PatientDetailsPresenter(view);
         await p.mount({ patient, sessionId: 'session-abc' });
@@ -667,7 +658,7 @@ describe('onMicPress', () => {
 
         const view = makeView();
         const p = new PatientDetailsPresenter(view);
-        await p.mount({ patient: makePatient(), sessionId: null });
+        await p.mount({ patient: makePatient({ name: 'Bob' }), sessionId: null });
 
         await p.onMicPress();
 

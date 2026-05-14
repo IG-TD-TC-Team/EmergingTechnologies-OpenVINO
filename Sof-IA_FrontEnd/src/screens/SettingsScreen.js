@@ -10,29 +10,54 @@
  * Features are COMPLETELY HIDDEN (not disabled/grayed out) when unsupported.
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   SafeAreaView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
   ScrollView,
   Switch,
   Alert,
 } from 'react-native';
+import { SvgXml } from 'react-native-svg';
 import {
   useCapabilities,
   usePlatformName,
-  useIsNative,
   useIsWeb,
 } from '../config/CapabilitiesContext';
+import ApiConfigService from '../services/ApiConfigService';
+
+const arrowBackSvg = `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M20 11H7.83L13.42 5.41L12 4L4 12L12 20L13.41 18.59L7.83 13H20V11Z" fill="#1D1B20"/>
+</svg>`;
 
 export default function SettingsScreen({ navigation }) {
   const capabilities = useCapabilities();
   const platformName = usePlatformName();
-  const isNative = useIsNative();
   const isWeb = useIsWeb();
+
+  // API URL state
+  const [apiUrl, setApiUrl] = useState('');
+  const [apiUrlSaved, setApiUrlSaved] = useState(false);
+
+  useEffect(() => {
+    ApiConfigService.getApiUrl().then(setApiUrl);
+  }, []);
+
+  const handleSaveApiUrl = async () => {
+    if (!apiUrl.trim()) return;
+    await ApiConfigService.setApiUrl(apiUrl.trim());
+    setApiUrlSaved(true);
+    setTimeout(() => setApiUrlSaved(false), 2000);
+  };
+
+  const handleResetApiUrl = async () => {
+    await ApiConfigService.reset();
+    setApiUrl(ApiConfigService.getDefault());
+  };
 
   // Settings state
   const [backgroundSyncEnabled, setBackgroundSyncEnabled] = useState(false);
@@ -82,10 +107,11 @@ export default function SettingsScreen({ navigation }) {
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity
-          onPress={() => navigation.goBack()}
+          onPress={() => navigation.canGoBack() ? navigation.goBack() : navigation.navigate('ModeSelection')}
           style={styles.backButton}
+          accessibilityLabel="Go back"
         >
-          <Text style={styles.backText}>← Back</Text>
+          <SvgXml xml={arrowBackSvg} width={24} height={24} />
         </TouchableOpacity>
         <Text style={styles.title}>Settings</Text>
       </View>
@@ -111,6 +137,37 @@ export default function SettingsScreen({ navigation }) {
                 ? 'Expo AV (Native)'
                 : 'MediaRecorder (Web)'}
             </Text>
+          </View>
+        </View>
+
+        {/* Server Connection - ALWAYS shown */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Server Connection</Text>
+          <Text style={styles.sectionDescription}>
+            Backend API URL used for voice transcription
+          </Text>
+          <TextInput
+            style={styles.urlInput}
+            value={apiUrl}
+            onChangeText={setApiUrl}
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="url"
+            placeholder="http://localhost:8000"
+            placeholderTextColor="#9E9E9E"
+          />
+          <Text style={styles.urlHint}>
+            Default: {ApiConfigService.getDefault()}
+          </Text>
+          <View style={styles.urlActions}>
+            <TouchableOpacity style={styles.urlResetBtn} onPress={handleResetApiUrl}>
+              <Text style={styles.urlResetText}>Reset to default</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.urlSaveBtn} onPress={handleSaveApiUrl}>
+              <Text style={styles.urlSaveText}>
+                {apiUrlSaved ? 'Saved' : 'Save'}
+              </Text>
+            </TouchableOpacity>
           </View>
         </View>
 
@@ -211,64 +268,6 @@ export default function SettingsScreen({ navigation }) {
           </View>
         )}
 
-        {/* Common Settings - ALWAYS shown */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>General</Text>
-
-          <TouchableOpacity style={styles.settingRow}>
-            <Text style={styles.settingLabel}>Language</Text>
-            <Text style={styles.settingValue}>English</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.settingRow}>
-            <Text style={styles.settingLabel}>Privacy Settings</Text>
-            <Text style={styles.settingValue}>›</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.settingRow}>
-            <Text style={styles.settingLabel}>About</Text>
-            <Text style={styles.settingValue}>v1.0.0</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Feature Availability (Debug - DEV only) */}
-        {__DEV__ && (
-          <View style={styles.debugSection}>
-            <Text style={styles.debugTitle}>Feature Availability (DEV)</Text>
-            <View style={styles.debugGrid}>
-              <View style={styles.debugRow}>
-                <Text style={styles.debugLabel}>Bluetooth</Text>
-                <Text style={capabilities.hasBluetooth ? styles.debugAvailable : styles.debugUnavailable}>
-                  {capabilities.hasBluetooth ? '✓ Available' : '✗ Not Available'}
-                </Text>
-              </View>
-              <View style={styles.debugRow}>
-                <Text style={styles.debugLabel}>File System</Text>
-                <Text style={capabilities.hasFileSystem ? styles.debugAvailable : styles.debugUnavailable}>
-                  {capabilities.hasFileSystem ? '✓ Available' : '✗ Not Available'}
-                </Text>
-              </View>
-              <View style={styles.debugRow}>
-                <Text style={styles.debugLabel}>Background Tasks</Text>
-                <Text style={capabilities.hasBackgroundTasks ? styles.debugAvailable : styles.debugUnavailable}>
-                  {capabilities.hasBackgroundTasks ? '✓ Available' : '✗ Not Available'}
-                </Text>
-              </View>
-              <View style={styles.debugRow}>
-                <Text style={styles.debugLabel}>Is Native</Text>
-                <Text style={isNative ? styles.debugAvailable : styles.debugUnavailable}>
-                  {isNative ? '✓ Yes' : '✗ No'}
-                </Text>
-              </View>
-              <View style={styles.debugRow}>
-                <Text style={styles.debugLabel}>Is Web</Text>
-                <Text style={isWeb ? styles.debugAvailable : styles.debugUnavailable}>
-                  {isWeb ? '✓ Yes' : '✗ No'}
-                </Text>
-              </View>
-            </View>
-          </View>
-        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -292,10 +291,7 @@ const styles = StyleSheet.create({
   },
   backButton: {
     padding: 4,
-  },
-  backText: {
-    fontSize: 16,
-    color: '#6B6EDF',
+    marginRight: 4,
   },
   title: {
     fontSize: 24,
@@ -346,6 +342,49 @@ const styles = StyleSheet.create({
     color: '#9E9E9E',
     marginTop: 2,
   },
+  urlInput: {
+    borderWidth: 1,
+    borderColor: '#CAC4D0',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: '#1D1B20',
+    fontFamily: 'monospace',
+  },
+  urlHint: {
+    fontSize: 11,
+    color: '#9E9E9E',
+    fontFamily: 'monospace',
+  },
+  urlActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10,
+    marginTop: 4,
+  },
+  urlResetBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#CAC4D0',
+  },
+  urlResetText: {
+    fontSize: 13,
+    color: '#5F5E5A',
+  },
+  urlSaveBtn: {
+    paddingHorizontal: 18,
+    paddingVertical: 8,
+    borderRadius: 6,
+    backgroundColor: '#1D9E75',
+  },
+  urlSaveText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
   button: {
     backgroundColor: '#6B6EDF',
     borderRadius: 8,
@@ -379,43 +418,5 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#0D47A1',
     lineHeight: 20,
-  },
-  debugSection: {
-    backgroundColor: '#FFF3CD',
-    borderRadius: 8,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#FFE082',
-  },
-  debugTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#856404',
-    marginBottom: 12,
-  },
-  debugGrid: {
-    gap: 8,
-  },
-  debugRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  debugLabel: {
-    fontSize: 12,
-    color: '#856404',
-    fontFamily: 'monospace',
-  },
-  debugAvailable: {
-    fontSize: 12,
-    color: '#155724',
-    fontWeight: '600',
-    fontFamily: 'monospace',
-  },
-  debugUnavailable: {
-    fontSize: 12,
-    color: '#721c24',
-    fontWeight: '600',
-    fontFamily: 'monospace',
   },
 });

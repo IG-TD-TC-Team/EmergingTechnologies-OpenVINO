@@ -62,6 +62,13 @@ export interface IOfflineQueueRepository {
   deleteEntry(id: string): Promise<void>;
 
   /**
+   * Delete all entries for a given session regardless of status.
+   * Called by EndShiftService so force-deleted failed chunks don't re-trigger
+   * the offline gate on the next shift end.
+   */
+  clearBySession(sessionId: string): Promise<void>;
+
+  /**
    * Estimate the total bytes consumed by all queued audio chunks.
    *
    * Implementation notes:

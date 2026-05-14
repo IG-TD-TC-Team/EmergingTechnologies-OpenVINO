@@ -49,6 +49,7 @@ import {
 } from 'react-native';
 import OfflineQueueManager from '../services/queue/OfflineQueueManager';
 import NetworkMonitor, { useNetworkStatus } from '../services/network/NetworkMonitor';
+import SessionService from '../services/SessionService';
 import type { SyncStatus } from '../types/offlineQueue';
 
 // ─── State derivation ─────────────────────────────────────────────────────────
@@ -88,15 +89,21 @@ export default function SyncStatusIndicator() {
 
   const refreshStats = useCallback(async () => {
     try {
-      const stats = await OfflineQueueManager.getQueueStats();
+      const sessionId = await SessionService.getActiveSessionId();
+      if (!sessionId) {
+        setPendingCount(0);
+        setFailedCount(0);
+        setIsSyncing(false);
+        return;
+      }
+      const stats = await OfflineQueueManager.getSessionStats(sessionId);
       setPendingCount(stats.pendingCount);
       setFailedCount(stats.failedCount);
-      // If the queue drained completely, clear the syncing flag.
       if (stats.pendingCount === 0) {
         setIsSyncing(false);
       }
     } catch (err) {
-      console.warn('[SyncStatusIndicator] getQueueStats error:', err);
+      console.warn('[SyncStatusIndicator] refreshStats error:', err);
     }
   }, []);
 

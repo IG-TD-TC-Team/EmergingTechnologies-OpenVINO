@@ -76,7 +76,7 @@ const ServiceWorkerManager = {
         // recovering transcription API call (fetch event interception) or after
         // a background sync completes. We delegate to OfflineQueueManager which
         // owns the backoff logic and the _draining guard.
-        navigator.serviceWorker.addEventListener('message', (event) => {
+        navigator.serviceWorker?.addEventListener?.('message', (event) => {
             if (event?.data?.type === 'QUEUE_RETRY') {
                 console.log('[ServiceWorkerManager] QUEUE_RETRY received from SW');
                 OfflineQueueManager.retryPending().catch((err) =>
@@ -89,14 +89,16 @@ const ServiceWorkerManager = {
         // Triggered when the nurse switches back to the tab (or unlocks the device
         // with the tab open). Covers browsers that don't support Background Sync
         // or cases where the SW message was lost while the tab was hidden.
-        document.addEventListener('visibilitychange', () => {
-            if (document.visibilityState === 'visible') {
-                console.log('[ServiceWorkerManager] Tab visible — draining queue');
-                OfflineQueueManager.retryPending().catch((err) =>
-                    console.error('[ServiceWorkerManager] retryPending (visibility) error:', err)
-                );
-            }
-        });
+        if (typeof document !== 'undefined') {
+            document.addEventListener?.('visibilitychange', () => {
+                if (document.visibilityState === 'visible') {
+                    console.log('[ServiceWorkerManager] Tab visible — draining queue');
+                    OfflineQueueManager.retryPending().catch((err) =>
+                        console.error('[ServiceWorkerManager] retryPending (visibility) error:', err)
+                    );
+                }
+            });
+        }
 
         console.log('[ServiceWorkerManager] Page listeners active (message + visibilitychange)');
     },

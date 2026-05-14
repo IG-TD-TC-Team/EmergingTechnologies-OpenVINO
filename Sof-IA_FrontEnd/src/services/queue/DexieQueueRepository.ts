@@ -62,6 +62,10 @@ export class DexieQueueRepository implements IOfflineQueueRepository {
     await this.db.offline_queue.delete(id);
   }
 
+  async clearBySession(sessionId: string): Promise<void> {
+    await this.db.offline_queue.where('session_id').equals(sessionId).delete();
+  }
+
   // ─── Read ────────────────────────────────────────────────────────────────
 
   /**

@@ -8,6 +8,7 @@ import DashboardScreen from '../screens/DashboardScreen';
 import EditPatientScreen from '../screens/EditPatientScreen';
 import LoadingScreen from '../screens/LoadingScreen';
 import ModeSelectionScreen from '../screens/ModeSelectionScreen';
+import SettingsScreen from '../screens/SettingsScreen';
 
 const Stack = createStackNavigator();
 
@@ -34,6 +35,7 @@ function AppNavigator() {
         <Stack.Screen name="BedDetails"    component={BedDetailScreen}  options={SLIDE_OPTIONS} />
         <Stack.Screen name="CardDetail"    component={CardDetailScreen}  options={SLIDE_OPTIONS} />
         <Stack.Screen name="EditPatient"   component={EditPatientScreen} options={SLIDE_OPTIONS} />
+        <Stack.Screen name="Settings"      component={SettingsScreen}    options={SLIDE_OPTIONS} />
       </Stack.Navigator>
     </NavigationContainer>
   );

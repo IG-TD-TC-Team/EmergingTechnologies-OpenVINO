@@ -201,7 +201,7 @@ describe('onEditPress', () => {
         expect(() => p.onEditPress()).not.toThrow();
     });
 
-    it('navigates to EditPatient with correct params when navigation is provided', async () => {
+    it('navigates to EditPatient with currentValue pre-populated from _buildCopyText (recent_activity)', async () => {
         const navigation = { navigate: jest.fn() };
         const view = makeView();
         const p = new CardDetailPresenter(view);
@@ -212,9 +212,32 @@ describe('onEditPress', () => {
             expect.objectContaining({
                 patientId:    'p-1',
                 fieldKey:     'recent_activity',
+                // recent_activity with no sections/segments falls back to transcript
                 currentValue: 'Patient reports pain at wound site.',
             })
         );
+    });
+
+    it('pre-populates vital_signs card with formatted vitals text (not blank)', async () => {
+        const navigation = { navigate: jest.fn() };
+        const card = makeCard({
+            type:       'vital_signs',
+            transcript: null,
+            sections:   null,
+            data: {
+                blood_pressure: '120/80',
+                heart_rate:     72,
+                temperature:    null,
+                spo2:           null,
+            },
+        });
+        const view = makeView();
+        const p = new CardDetailPresenter(view);
+        await p.mount({ card, patient: makePatient(), navigation });
+        p.onEditPress();
+        const { currentValue } = navigation.navigate.mock.calls[0][1];
+        expect(currentValue).toContain('Blood Pressure: 120/80');
+        expect(currentValue).toContain('Heart Rate: 72');
     });
 });
 

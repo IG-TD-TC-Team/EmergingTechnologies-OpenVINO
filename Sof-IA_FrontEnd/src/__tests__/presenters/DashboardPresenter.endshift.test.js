@@ -30,6 +30,8 @@ jest.mock('../../services/queue/OfflineQueueManager', () => ({
   default: {
     retryPending: jest.fn(),
     getQueueStats: jest.fn(),
+    getSessionStats: jest.fn(),
+    clearSession: jest.fn().mockResolvedValue(undefined),
     configure: jest.fn(),
     on: jest.fn(() => jest.fn()),
   },
@@ -138,7 +140,7 @@ describe('DashboardPresenter — end shift flow', () => {
     SessionService.setRecordingActive.mockResolvedValue(undefined);
     // Default: queue is empty after retry
     OfflineQueueManager.retryPending.mockResolvedValue(undefined);
-    OfflineQueueManager.getQueueStats.mockResolvedValue({ pendingCount: 0, failedCount: 0 });
+    OfflineQueueManager.getSessionStats.mockResolvedValue({ pendingCount: 0, failedCount: 0 });
   });
 
   // ── Step 1: button tap ────────────────────────────────────────────────────
@@ -164,7 +166,7 @@ describe('DashboardPresenter — end shift flow', () => {
   describe('onEndShiftConfirmed — queue empty', () => {
     beforeEach(() => {
       // Queue drains fully
-      OfflineQueueManager.getQueueStats.mockResolvedValue({ pendingCount: 0, failedCount: 0 });
+      OfflineQueueManager.getSessionStats.mockResolvedValue({ pendingCount: 0, failedCount: 0 });
       EndShiftService.run.mockResolvedValue({ success: true, failedItems: [], durationMs: 80 });
     });
 
@@ -214,7 +216,7 @@ describe('DashboardPresenter — end shift flow', () => {
 
   describe('onEndShiftConfirmed — chunks remain after retry', () => {
     beforeEach(() => {
-      OfflineQueueManager.getQueueStats.mockResolvedValue({ pendingCount: 2, failedCount: 1 });
+      OfflineQueueManager.getSessionStats.mockResolvedValue({ pendingCount: 2, failedCount: 1 });
     });
 
     it('shows the offline gate', async () => {
@@ -239,7 +241,7 @@ describe('DashboardPresenter — end shift flow', () => {
 
   describe('onEndShiftConfirmed — only failed chunks remain', () => {
     beforeEach(() => {
-      OfflineQueueManager.getQueueStats.mockResolvedValue({ pendingCount: 0, failedCount: 2 });
+      OfflineQueueManager.getSessionStats.mockResolvedValue({ pendingCount: 0, failedCount: 2 });
     });
 
     it('shows the offline gate for failed chunks too', async () => {
@@ -345,7 +347,7 @@ describe('DashboardPresenter — end shift flow', () => {
 
   describe('full happy-path sequence', () => {
     it('walks through all state transitions in order', async () => {
-      OfflineQueueManager.getQueueStats.mockResolvedValue({ pendingCount: 0, failedCount: 0 });
+      OfflineQueueManager.getSessionStats.mockResolvedValue({ pendingCount: 0, failedCount: 0 });
       EndShiftService.run.mockResolvedValue({ success: true, failedItems: [], durationMs: 120 });
 
       // 1. Tap button
@@ -383,7 +385,7 @@ describe('DashboardPresenter — end shift flow', () => {
 
   describe('unsynced gate → force delete sequence', () => {
     it('shows count, then wipes on force delete', async () => {
-      OfflineQueueManager.getQueueStats.mockResolvedValue({ pendingCount: 3, failedCount: 0 });
+      OfflineQueueManager.getSessionStats.mockResolvedValue({ pendingCount: 3, failedCount: 0 });
       EndShiftService.run.mockResolvedValue({ success: true, failedItems: [], durationMs: 90 });
 
       // Confirm end shift

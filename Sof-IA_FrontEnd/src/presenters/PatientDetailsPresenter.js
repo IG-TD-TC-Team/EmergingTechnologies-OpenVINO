@@ -4,7 +4,6 @@ import ContinuousRecordingService from '../services/audio/ContinuousRecordingSer
 import WebRecorderService from '../services/audio/WebRecorderService';
 import SessionService from '../services/SessionService';
 import { getStorage } from '../repositories';
-import { PatientRepository } from '../repositories/PatientRepository';
 
 // ─── Demo script (Alice, nurse-patient consultation only, BP 100/65) ──────────
 // Cards are pushed directly to the view on a timer; no real recording is made.
@@ -112,7 +111,6 @@ export default class PatientDetailsPresenter {
         await this._resolveAudioSource();
         await this._loadSessionCard();
         await this._loadCards();
-        await this.loadPatientFields();
 
         this._unsubRecording = ContinuousRecordingService.subscribe(({ isRecording, connectionStatus }) => {
             this._view.setRecording(isRecording);
@@ -165,10 +163,9 @@ export default class PatientDetailsPresenter {
                 this._view.setSessionCard(null);
                 return;
             }
-            // expires_at on the session record is set by the repository (BaseEntity TTL).
-            // Fall back to started_at + 14h if the field is null.
-            const expiresAt = session.expires_at
-                ?? new Date(new Date(session.started_at).getTime() + 14 * 60 * 60 * 1000).toISOString();
+            // Display expiry = start + 12 h (shift duration).
+            // session.expires_at is the DB retention TTL (30 days), not the shift end.
+            const expiresAt = new Date(new Date(session.started_at).getTime() + 12 * 60 * 60 * 1000).toISOString();
             this._view.setSessionCard({ startedAt: session.started_at, expiresAt });
         } catch (e) {
             console.error('[PatientDetailsPresenter] Failed to load session card:', e);
@@ -276,30 +273,7 @@ export default class PatientDetailsPresenter {
         }
     }
 
-    // ─── Patient fields (US19) ────────────────────────────────────────────────
-
-    async loadPatientFields() {
-        if (!this._patient?.id) return;
-        try {
-            const repo = new PatientRepository();
-            const record = await repo.get(this._patient.id);
-            this._view.setPatientFields?.(record?.fields ?? []);
-        } catch (_) {
-            this._view.setPatientFields?.([]);
-        }
-    }
-
-    onFieldPress(field, navigation) {
-        navigation.navigate('EditPatient', {
-            patientId:    this._patient?.id ?? '',
-            fieldKey:     field.key,
-            currentValue: Array.isArray(field.value)
-                ? field.value.join(', ')
-                : (field.value ?? ''),
-        });
-    }
-
-    // ─── Card navigation (US11 = CardDetail, US19 = CardCorrection) ─────────
+    // ─── Card navigation ──────────────────────────────────────────────────────
 
     onCardPress(card, navigation) {
         if (!card.hasData) return;

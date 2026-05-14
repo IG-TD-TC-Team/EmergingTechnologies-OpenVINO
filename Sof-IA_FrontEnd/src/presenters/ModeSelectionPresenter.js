@@ -42,8 +42,8 @@ class ModeSelectionPresenter {
     // Future feature — disabled in v1
   }
 
-  onCustomizeSofia() {
-    // Future feature — disabled in v1
+  onCustomizeSofia(navigation) {
+    navigation.navigate('Settings');
   }
 }
 

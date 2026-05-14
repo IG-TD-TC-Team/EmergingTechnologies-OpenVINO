@@ -44,7 +44,11 @@ jest.mock('react-native-svg', () => ({
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const mockNavigation = { goBack: jest.fn(), navigate: jest.fn() };
+const mockNavigation = {
+    goBack:      jest.fn(),
+    navigate:    jest.fn(),
+    addListener: jest.fn().mockReturnValue(jest.fn()), // returns the unsubscribe fn
+};
 
 function makeRoute({ card = {}, patient = {} } = {}) {
     return {

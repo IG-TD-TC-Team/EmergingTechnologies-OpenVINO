@@ -19,8 +19,8 @@ npm test
 
 Expected output:
 ```
-Test Suites: 3 passed, 3 total
-Tests:       22+ passed, 22+ total
+Test Suites: 1 passed, 1 total
+Tests:       26 passed, 26 total
 ```
 
 ### 3. Start the App
@@ -179,10 +179,10 @@ import SessionService from '@/services/SessionService';
 
 // Get/Save nurse name (UI preference)
 const name = await SessionService.getNurseName();
-await SessionService.saveNurseName('Dr. Martinez');
+await SessionService.saveNurseName('RN. Martinez');
 
 // Start a shift
-const session = await SessionService.startShift('Dr. Martinez');
+const session = await SessionService.startShift('RN. Martinez');
 
 // Get active shift
 const activeShift = await SessionService.getActiveShift();
@@ -237,8 +237,8 @@ console.log('Shift ended:', ended.ended_at);
 
 ### Automatic Data Cleanup (TTL)
 
-All records have a 30-day expiration. On app launch, `purgeExpired()` removes:
-- Sessions older than 30 days
+All records have a 12hours expiration. On app launch, `purgeExpired()` removes:
+- Sessions older than 12 hours
 - All related patients (CASCADE)
 - All related audio recordings (CASCADE)
 - All related transcriptions (CASCADE)
@@ -485,7 +485,7 @@ npm test
 ┌─────────────────────────────────────┐
 │  Feature Layer                      │
 │  - SessionService                   │
-│  - Future: PatientService, etc.     │
+│  - TranscriptionService, etc.       │
 └─────────────┬───────────────────────┘
               │
               ↓
@@ -567,7 +567,7 @@ npx expo start -c
 
 ---
 
-**Status**: Production Ready
+**Status**: Prototyping Ready
 **Compliance**: 100%
 **Platforms**: Android, iOS, Web
-**Date**: 2026-03-30
+**Date**: 2026-05-14

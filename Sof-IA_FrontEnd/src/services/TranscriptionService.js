@@ -76,10 +76,7 @@ import { getStorage } from '../repositories';
 import { capabilities } from '../config/capabilities';
 import SessionService from './SessionService';
 import OfflineQueueManager from './queue/OfflineQueueManager';
-
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.sofia-health.example/v1';
-const ENDPOINT = `${API_BASE_URL}/api/voice/transcribe-and-structure`;
-console.log('[TranscriptionService] API endpoint:', ENDPOINT);
+import ApiConfigService from './ApiConfigService';
 
 const TranscriptionService = {
 
@@ -96,7 +93,7 @@ const TranscriptionService = {
    * @param {string} params.mimeType       — 'audio/webm' | 'audio/mp4'
    * @param {number} params.timestampStart — recording start time in ms
    */
-  async processChunk({ recordingId, filePath, sessionId, mimeType, patientId = null, timestampStart }) {
+  async processChunk({ recordingId, filePath, sessionId, mimeType, patientId = null, timestampStart, _skipQueue = false }) {
     try {
       const session = await SessionService.getActiveShift();
       const nurseId = session?.nurse_name ?? 'unknown';
@@ -107,12 +104,15 @@ const TranscriptionService = {
         new Date(startedAt).getTime() + 14 * 60 * 60 * 1000
       ).toISOString();
 
+      const apiUrl = await ApiConfigService.getApiUrl();
+      const endpoint = `${apiUrl}/api/voice/transcribe-and-structure`;
+
       const formData = await this._buildFormData(filePath, mimeType);
       formData.append('session_id', sessionId);
       formData.append('timestamp_start', String(timestampStart));
       formData.append('nurse_id', nurseId);
 
-      const response = await fetch(ENDPOINT, { method: 'POST', body: formData });
+      const response = await fetch(endpoint, { method: 'POST', body: formData });
 
       if (!response.ok) {
         throw new Error(`API responded with status ${response.status}`);
@@ -128,9 +128,17 @@ const TranscriptionService = {
       console.log('[TranscriptionService] Chunk processed — recording:', recordingId);
       return { success: true };
     } catch (error) {
-      console.warn('[TranscriptionService] Chunk failed, queuing for retry:', error.message);
-      await OfflineQueueManager.enqueue(recordingId, sessionId);
-      return { success: false, error: error.message };
+      const msg = error?.message ?? 'Unknown error';
+      if (msg.includes('Blob not found in IndexedDB')) {
+        // Blob expired or purged — data is gone, retrying won't help.
+        console.warn('[TranscriptionService] Blob missing for recording', recordingId, '— skipping retry enqueue');
+      } else {
+        console.warn('[TranscriptionService] Chunk failed, queuing for retry:', msg);
+        if (!_skipQueue) {
+          await OfflineQueueManager.enqueue(recordingId, sessionId);
+        }
+      }
+      return { success: false, error: msg };
     }
   },
 

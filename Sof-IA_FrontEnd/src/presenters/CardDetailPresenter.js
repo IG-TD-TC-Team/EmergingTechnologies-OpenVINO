@@ -99,7 +99,7 @@ export default class CardDetailPresenter {
         this._navigation.navigate('EditPatient', {
             patientId:    this._patient?.id ?? '',
             fieldKey:     this._card?.type ?? 'recent_activity',
-            currentValue: this._card?.transcript ?? '',
+            currentValue: this._buildCopyText(),
         });
     }
 

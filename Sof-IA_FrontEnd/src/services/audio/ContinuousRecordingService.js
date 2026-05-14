@@ -19,6 +19,7 @@ import { getStorage } from '../../repositories';
 import AudioSourceResolver from './AudioSourceResolver';
 import ExpoAvRecordingStrategy from './ExpoAvRecordingStrategy';
 import WebMediaRecordingStrategy from './WebMediaRecordingStrategy';
+import TranscriptionService from '../TranscriptionService';
 import ChunkUploadService from './ChunkUploadService';
 import OfflineQueueService from './OfflineQueueService';
 import OfflineQueueManager from '../queue/OfflineQueueManager';
@@ -89,9 +90,23 @@ const ContinuousRecordingService = {
             const storage = await getStorage();
             const recording = await storage.read('audio_recordings', chunkRef);
             if (!recording) {
-              return { success: false, error: `Recording not found: ${chunkRef}` };
+              // Data expired or purged — nothing to upload. Silently succeed to
+              // remove the stale entry from the queue without firing a toast.
+              console.warn('[ContinuousRecording] uploadFn: recording not found, cleaning up stale queue entry:', chunkRef);
+              return { success: true };
             }
-            return ChunkUploadService.upload({
+
+            // Verify the blob still exists before attempting the API call.
+            if (recording.file_path && recording.file_path.startsWith('indexeddb://audio-blobs/')) {
+              const blobId = recording.file_path.replace('indexeddb://audio-blobs/', '');
+              const blobRecord = await storage.read('audio_blobs', blobId);
+              if (!blobRecord) {
+                console.warn('[ContinuousRecording] uploadFn: blob expired, cleaning up stale queue entry:', blobId);
+                return { success: true };
+              }
+            }
+
+            return TranscriptionService.processChunk({
               recordingId: recording.id,
               filePath: recording.file_path,
               sessionId,
@@ -100,8 +115,10 @@ const ContinuousRecordingService = {
               timestampStart: recording.started_at
                 ? new Date(recording.started_at).getTime()
                 : Date.now(),
+              _skipQueue: true,
             });
           } catch (err) {
+            console.warn('[ContinuousRecording] uploadFn error:', err?.message);
             return { success: false, error: err?.message ?? 'Upload failed' };
           }
         },
@@ -298,13 +315,14 @@ const ContinuousRecordingService = {
       expires_at: new Date(Date.now() + 14 * 60 * 60 * 1000).toISOString(),
     });
 
-    // Upload immediately — TranscriptionService queues to OfflineQueueManager on failure
-    await ChunkUploadService.upload({
+    // Upload immediately — queued to OfflineQueueManager on failure
+    await TranscriptionService.processChunk({
       recordingId: recording.id,
       filePath: uri,
       sessionId: this._sessionId,
       mimeType,
       patientId: this._patientId,
+      timestampStart: new Date(recording.started_at).getTime(),
     });
   },
 

@@ -104,6 +104,11 @@ export class SQLiteQueueRepository implements IOfflineQueueRepository {
     this.db.runSync(`DELETE FROM offline_queue WHERE id = ?`, [id]);
   }
 
+  async clearBySession(sessionId: string): Promise<void> {
+    await this.ensureInitialized();
+    this.db.runSync(`DELETE FROM offline_queue WHERE session_id = ?`, [sessionId]);
+  }
+
   // ─── Read ────────────────────────────────────────────────────────────────
 
   /**

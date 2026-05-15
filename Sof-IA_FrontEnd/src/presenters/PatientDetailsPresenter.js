@@ -4,6 +4,7 @@ import ContinuousRecordingService from '../services/audio/ContinuousRecordingSer
 import WebRecorderService from '../services/audio/WebRecorderService';
 import SessionService from '../services/SessionService';
 import { getStorage } from '../repositories';
+import { PatientRepository } from '../repositories/PatientRepository';
 
 // ─── Demo script (Alice, nurse-patient consultation only, BP 100/65) ──────────
 // Cards are pushed directly to the view on a timer; no real recording is made.
@@ -203,6 +204,28 @@ export default class PatientDetailsPresenter {
             ]);
 
             const cards = buildCards(allSegments, medications, vitalSigns, allergies, safetyInfo, this._patient);
+
+            // Overlay nurse edits: replace card previews with what the nurse saved.
+            if (bedId) {
+                try {
+                    const repo = new PatientRepository();
+                    const record = await repo.get(bedId);
+                    if (record?.fields) {
+                        for (const field of record.fields) {
+                            if (field.edited_by && field.value != null && field.value !== '') {
+                                const idx = cards.findIndex((c) => c.type === field.key);
+                                if (idx !== -1) {
+                                    cards[idx] = {
+                                        ...cards[idx],
+                                        preview: String(field.value).substring(0, 80),
+                                        editedByNurse: true,
+                                    };
+                                }
+                            }
+                        }
+                    }
+                } catch (_) {}
+            }
 
             // Only call setCards when something actually changed to avoid spurious re-renders
             const keys = JSON.stringify(cards.map((c) => `${c.type}:${c.preview}`));

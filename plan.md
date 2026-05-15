@@ -1,9 +1,9 @@
-# US19 — Card Editing Refactor + Bug Fixes
+# Model Manager — Web UI for downloading & converting models
 
-**Story**: As a nurse, I want to correct any clinical card captured by the AI so that the data in the system accurately reflects what happened with the patient.
+**Story**: As a colleague, I want to add new AI models to the benchmark via the web interface so that I don't need to run Python scripts in the terminal.
 
-**Sprint**: Post-sprint bug-fix phase
-**Azure DevOps**: Work item #19 (Active) — https://dev.azure.com/Sof-IA/Front-End-React/_workitems/edit/19
+**Sprint**: Post-sprint improvement
+**Context**: Benchmark dashboard currently requires manual terminal work to add models. This adds a **Models** tab where colleagues see a curated catalogue, check what's already on disk, and one-click download + convert to OpenVINO with live progress.
 
 ---
 
@@ -11,141 +11,99 @@
 
 | Decision | Rationale |
 |----------|-----------|
-| Remove PatientInfoSection entirely | Administrative fields (name, MRN, DOB) are not AI-captured; editing them from the app adds no clinical value and creates UX confusion. The real US19 goal is correcting AI-captured clinical cards. |
-| Keep PatientRepository + field_edits storage | The `field_edits` JSON blob on the patient record is still the persistence layer for card edits (synthetic keys: `recent_activity`, `vital_signs`, etc.). Only the view layer changes. |
-| Pre-populate from `_buildCopyText()` | Reuses existing formatting logic. One-line fix. The nurse must see what the AI captured before editing — blank form is unusable. |
-| FlatList scroll fix | Without `flex: 1`, FlatList never claims bounded height → items clip behind the bottom bar. |
-
----
-
-## DB Impact — PatientInfoSection removal
-
-`PatientRepository.get()` and `updateField()` remain in use after the removal:
-
-| Caller | Still needed? |
-|--------|---------------|
-| `CardDetailPresenter.checkEditStatus()` | YES — reads `field_edits` to check if a card was edited |
-| `EditPatientPresenter.mount()` | YES — reads edit history (edited_by, original_value) for any fieldKey |
-| `EditPatientPresenter.onSave()` | YES — writes card corrections via `updateField(patientId, card.type, newValue)` |
-| `PatientDetailsPresenter.loadPatientFields()` | REMOVED — only fed PatientInfoSection |
-| `PatientDetailsPresenter.onFieldPress()` | REMOVED — only called from PatientInfoSection |
-
-`FIELD_COLUMN_MAP` columns (name, bed, mrn, date_of_birth, diagnosis, allergies, medications, notes) remain in the `patients` table. They are no longer editable from the UI. The `buildCards` fallback paths (`patient?.allergies`, `patient?.notes`) continue to work from the patient object passed as a nav param.
-
-**No migration. No DB schema change.**
-
----
-
-## Bug 1 — Remove PatientInfoSection
-
-**Files touched**: `BedDetailScreen.js`, `PatientDetailsPresenter.js`
-
-### BedDetailScreen.js
-
-Remove:
-- `patientFields` state (`useState([])`)
-- The focus listener that calls `loadPatientFields()` (lines 287–291)
-- `PatientInfoSection` component definition (lines 222–254)
-- `PatientInfoSection` usage inside `ListHeaderComponent`
-- The `sectionLabel` divider (`{patientFields.length > 0 && cards.length > 0 && ...}`)
-- `setPatientFields` from the view interface object passed to presenter
-- `patientSection`, `patientSectionTitle`, `patientFieldRow`, `patientFieldContent`, `patientFieldLabel`, `patientFieldValue`, `patientFieldValueEdited`, `patientFieldRight`, `editedDot`, `sectionLabel` styles
-
-Keep:
-- `SessionActiveCard` in `ListHeaderComponent` (still useful — shows shift start time and expiry)
-- `FlatList` itself
-- All other state, presenter wiring, and the bottom bar
-
-### PatientDetailsPresenter.js
-
-Remove:
-- `loadPatientFields()` method
-- `onFieldPress()` method
-- The `loadPatientFields()` call inside `mount()`
-
-Keep:
-- Everything else — `_loadCards()`, `_loadSessionCard()`, `onCardPress()`, mic logic, demo logic
-
----
-
-## Bug 2 — Pre-populate edit form with AI-captured data
-
-**File**: `src/presenters/CardDetailPresenter.js`, `onEditPress()` (line 97–104)
-
-**Current behaviour**: passes `this._card?.transcript ?? ''` as `currentValue`. Transcript is only populated on `recent_activity` cards. For all other card types the nurse sees a blank text box.
-
-**Fix**: replace `currentValue` with `this._buildCopyText()`.
-
-`_buildCopyText()` already produces the correct text for every card type:
-
-| Card type | Output |
-|-----------|--------|
-| `recent_activity` | Full conversation (all segments joined) |
-| `vital_signs` | `Blood Pressure: 120/80 mmHg\nHeart Rate: 72 bpm\n…` |
-| `medications` | `Paracetamol — 500mg — qid\n…` |
-| `allergies` | `Penicillin — severe\n…` |
-| `next_reminder` | Actions joined with `\n` |
-| `safety_info` | Safety flags (falls through to transcript) |
-
-**Change** (1 line):
-```js
-// Before
-currentValue: this._card?.transcript ?? '',
-
-// After
-currentValue: this._buildCopyText(),
-```
-
-No other changes. The `EditPatientPresenter.mount()` already shows `original_value` (AI value) as a read-only audit trail when `isEdited` is true, so re-editing later still shows the original AI capture correctly.
-
----
-
-## Bug 3 — BedDetailScreen cards not scrollable
-
-**File**: `src/screens/BedDetailScreen.js`, `FlatList` element (line 330)
-
-**Root cause**: `FlatList` has no `style` prop. In a flex-column `SafeAreaView` (`flex: 1`), an unstyled `FlatList` takes its natural height (unconstrained), overflows past the bottom bar, and never scrolls.
-
-**Fix**: add `style={{ flex: 1 }}` to the `FlatList`.
-
-```jsx
-// Before
-<FlatList
-    data={cards}
-    keyExtractor={(item) => item.type}
-    contentContainerStyle={styles.cardList}
-    ...
-/>
-
-// After
-<FlatList
-    style={{ flex: 1 }}
-    data={cards}
-    keyExtractor={(item) => item.type}
-    contentContainerStyle={styles.cardList}
-    ...
-/>
-```
-
-`contentContainerStyle` stays as-is (padding, gap). Only the outer FlatList container gains `flex: 1`.
+| Curated catalogue (not open HF search) | Colleagues only see known-good models; no risk of trying unsupported architectures |
+| Reuse existing SSE job system | `jobs.py` + `QueueProgressChannel` already handle background tasks + SSE streaming |
+| `main_export` for SLM INT8 | Same approach as `convert_phi3_int8.py`; stable and tested |
+| `OVWeightQuantizationConfig(bits=4)` for INT4 | Pattern from `apertus_openvino.py`; required for >5B models |
+| `GenericSLMOpenVINO` class for LLaMA/Qwen | No existing class for these architectures; one generic wrapper covers all standard causal LMs |
+| Yaml key = `id.replace("-", "_")` | Consistent with existing naming (`phi3_openvino`, `whisper_openvino`) |
 
 ---
 
 ## Execution Order
 
-| Step | File | Change | Status |
-|------|------|--------|--------|
-| T1 | `BedDetailScreen.js` | Remove PatientInfoSection + patientFields state + focus listener + styles | Done |
-| T2 | `PatientDetailsPresenter.js` | Remove `loadPatientFields()` and `onFieldPress()` | Done |
-| T3 | `CardDetailPresenter.js` | `onEditPress()` — replace `card.transcript` with `_buildCopyText()` | Done |
-| T4 | `BedDetailScreen.js` | Add `style={{ flex: 1 }}` to FlatList | Done |
-| T5 | Tests | Fixed 3 pre-existing failures (locale AM/PM, demo-mode Alice); added vital_signs pre-population test | Done |
+| Step | File(s) | Change | Status |
+|------|---------|--------|--------|
+| T1 | `plan.md` | Reset to plan template | Done |
+| T2a | `src/model_manager/__init__.py` | Empty package init | Done |
+| T2b | `src/model_manager/catalogue.py` | 13-model curated list | Done |
+| T2c | `src/model_manager/disk.py` | `get_model_status()` — checks disk for OV/PyTorch files | Done |
+| T3a | `src/slm/generic_openvino.py` | `GenericSLMOpenVINO` — reusable causal LM class for LLaMA/Qwen | Done |
+| T3b | `src/model_manager/downloader.py` | `download_and_convert()` — main_export (SLM) / OVModelForSpeechSeq2Seq (ASR) | Done |
+| T3c | `src/model_manager/registry.py` | `add_model_to_yaml()` — inserts new entry in models.yaml | Done |
+| T4 | `web/server.py` | `GET /api/catalogue` + `POST /api/catalogue/download` | Done |
+| T5 | `web/static/api.js` | `fetchCatalogue()` + `startModelDownload()` | Done |
+| T6 | `web/static/composables/catalogue.js` | `CatalogueStore` — fetch, startDownload, SSE stream handler | Done |
+| T7 | `web/static/app.css` | `.model-card`, `.model-card.available`, `.model-card.downloading` pulse | Done |
+| T8a | `web/static/index.html` | Models mode HTML: nav button + two-column catalogue layout | Done |
+| T8b | `web/static/app.js` | Instantiate `CatalogueStore`, expose to template, mount init | Done |
+
+---
+
+## Catalogue — 13 models
+
+| id | hub_id | type | size | compression options |
+|----|--------|------|------|---------------------|
+| whisper-tiny-ov | openai/whisper-tiny | asr | 0.15 GB | int8 |
+| whisper-base-ov | openai/whisper-base | asr | 0.30 GB | int8 |
+| whisper-small-ov | openai/whisper-small | asr | 0.60 GB | int8 |
+| whisper-medium-ov *(on disk)* | openai/whisper-medium | asr | 1.50 GB | int8 |
+| whisper-large-ov | openai/whisper-large-v2 | asr | 3.10 GB | int8 |
+| phi3-mini-4k-int8 *(on disk)* | microsoft/Phi-3-mini-4k-instruct | slm | 2.1 GB | int8 |
+| phi3-small-8k-int8 | microsoft/Phi-3-small-8k-instruct | slm | 4.1 GB | int8 |
+| apertus-8b-int4 *(on disk)* | swiss-ai/Apertus-8B-Instruct-2509 | slm | 4.9 GB | int4 |
+| llama-3.2-1b-int8 | meta-llama/Llama-3.2-1B-Instruct | slm | 0.7 GB | int8 |
+| llama-3.2-3b-int8 | meta-llama/Llama-3.2-3B-Instruct | slm | 2.0 GB | int8 |
+| qwen2.5-1.5b-int8 | Qwen/Qwen2.5-1.5B-Instruct | slm | 1.0 GB | int8 |
+| qwen2.5-3b-int8 | Qwen/Qwen2.5-3B-Instruct | slm | 2.1 GB | int8 |
+| qwen2.5-7b-int4 | Qwen/Qwen2.5-7B-Instruct | slm | 4.5 GB | int4, int8 |
+
+---
+
+## Key technical details
+
+### Status detection (disk.py)
+- `downloaded_ov` — `models/<id>/openvino_model.xml` exists
+- `downloaded_pytorch` — `models/<id>/config.json` + at least one `*.safetensors` exists
+- `available` — nothing on disk
+
+### Conversion approach (downloader.py)
+- **SLM INT8**: `main_export(hub_id, output=target_dir, task="text-generation-with-past")`
+- **SLM INT4**: `OVModelForCausalLM.from_pretrained(hub_id, export=True, quantization_config=OVWeightQuantizationConfig(bits=4, sym=True, ratio=1.0, group_size=-1))`
+- **ASR**: `OVModelForSpeechSeq2Seq.from_pretrained(hub_id, export=True)` + save `AutoProcessor`
+- Progress reported via `channel.send_progress(msg)` at each step
+
+### Registry (registry.py)
+- Reads `config/models.yaml`, appends new entry, writes back
+- Yaml key = `catalogue_id.replace("-", "_")`
+- Entry mirrors existing schema (type, class, label, model_path, hub_id, enabled, max_new_tokens, chat_format)
+
+### SSE reuse
+- `POST /api/catalogue/download` returns `{job_id}`
+- Frontend subscribes to existing `GET /api/benchmark/{job_id}/stream`
+- No new SSE endpoint needed
+
+### New model class (generic_openvino.py)
+- Mirrors `Phi3OpenVINO` exactly but with no hardcoded hub_id default
+- Used for: llama-3.2-1b, llama-3.2-3b, qwen2.5-*
+- `chat_format` from yaml config passed at runtime (not in class — handled by server.py formatter)
+
+---
+
+## Verification
+
+1. `uvicorn web.server:app --reload --port 8000`
+2. Open `http://localhost:8000` → click **Models** tab
+3. Whisper medium, Phi-3, Apertus show white (active); others grey (available)
+4. Click "Download & Convert" on `whisper-tiny-ov` → live log appears in left panel
+5. On completion: card turns white, model appears in Benchmark dropdown
+6. `GET /api/catalogue` → all 13 entries with correct `status` field
 
 ---
 
 ## Out of Scope
 
-- Editing directly inside `CardDetailScreen` (inline editing) — too large a change, EditPatient flow is sufficient
-- Deleting individual card entries (e.g. remove one medication) — separate story
-- Syncing nurse corrections back to the backend — backend not yet set up for that
-- Editing demo cards (Alice) — demo data is ephemeral, no patient record in DB
+- Open HuggingFace search (free-text query)
+- Model deletion from UI
+- Editing existing models.yaml entries via UI
+- Special-case architectures (Apertus, Voxtral) — those already have their own scripts

@@ -1,10 +1,30 @@
 """Write new model entries to config/models.yaml after a successful conversion."""
 
+import shutil
 from pathlib import Path
 
 import yaml
 
 _CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "models.yaml"
+
+
+def _write_yaml_atomic(config: dict) -> None:
+    """Write config to models.yaml atomically via a temp file.
+
+    Writes to a sibling .tmp file first, then renames to the real path.
+    Prevents partial writes from corrupting the config on interruption.
+    """
+    tmp = _CONFIG_PATH.with_suffix(".tmp")
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            yaml.dump(config, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+        shutil.move(str(tmp), str(_CONFIG_PATH))
+    except Exception:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
 
 
 def add_pytorch_to_yaml(entry: dict) -> None:
@@ -45,9 +65,7 @@ def add_pytorch_to_yaml(entry: dict) -> None:
             new_entry["chat_format"] = entry["chat_format"]
 
     config.setdefault("models", {})[yaml_key] = new_entry
-
-    with open(_CONFIG_PATH, "w", encoding="utf-8") as f:
-        yaml.dump(config, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+    _write_yaml_atomic(config)
 
 
 def add_model_to_yaml(entry: dict, compression: str) -> None:
@@ -83,6 +101,4 @@ def add_model_to_yaml(entry: dict, compression: str) -> None:
             new_entry["chat_format"] = entry["chat_format"]
 
     config.setdefault("models", {})[yaml_key] = new_entry
-
-    with open(_CONFIG_PATH, "w", encoding="utf-8") as f:
-        yaml.dump(config, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+    _write_yaml_atomic(config)

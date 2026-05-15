@@ -204,22 +204,6 @@ CATALOGUE: list[dict] = [
         "chat_format": "llama3",
         "notes": "Multilingual 7B — best quality in this family",
     },
-    # ------------------------------------------------------------------
-    # SLM — MedGemma (Google)
-    # ------------------------------------------------------------------
-    {
-        "id": "medgemma-4b-it",
-        "label": "MedGemma 1.5 4B — OpenVINO INT8",
-        "hub_id": "google/medgemma-1.5-4b-it",
-        "type": "slm",
-        "model_class": "src.slm.generic_openvino.GenericSLMOpenVINO",
-        "size_gb": 2.3,
-        "default_compression": "int8",
-        "compression_options": ["int8"],
-        "max_new_tokens": 512,
-        "chat_format": "gemma",
-        "notes": "Google medical AI (Gemma 3 4B). Gated — paste HF token above. INT4 unsupported by current OpenVINO build.",
-    },
 ]
 
 # Quick lookup by id

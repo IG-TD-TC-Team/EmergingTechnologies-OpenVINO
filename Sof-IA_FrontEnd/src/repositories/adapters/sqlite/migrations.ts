@@ -352,6 +352,15 @@ export const migrations: Migration[] = [
       ALTER TABLE patients ADD COLUMN field_edits TEXT;
     `,
   },
+  {
+    version: 7,
+    name: 'fix_sessions_session_id_unique',
+    up: `
+      -- SQLite requires the referenced column to be PRIMARY KEY or UNIQUE for FK enforcement.
+      -- sessions.session_id is referenced by all child tables but had only a regular index.
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_session_id_unique ON sessions(session_id);
+    `,
+  },
 ];
 
 /**

@@ -86,12 +86,20 @@ export default class CardDetailPresenter {
     async checkEditStatus() {
         if (!this._patient?.id) return;
         try {
-            const repo    = new PatientRepository();
-            const record  = await repo.get(this._patient.id);
+            const repo     = new PatientRepository();
+            const record   = await repo.get(this._patient.id);
             const fieldKey = this._card?.type ?? 'recent_activity';
-            const field   = record?.fields?.find((f) => f.key === fieldKey);
-            this._view.setIsEdited?.(!!field?.edited_by);
-        } catch (_) {}
+            const field    = record?.fields?.find((f) => f.key === fieldKey);
+            const isEdited = !!field?.edited_by;
+            this._view.setIsEdited?.(isEdited);
+            // Surface the nurse-entered text so the card content updates on return.
+            const editedText = isEdited && field.value != null && field.value !== ''
+                ? String(field.value)
+                : null;
+            this._view.setEditedValue?.(editedText);
+        } catch (_) {
+            this._view.setIsEdited?.(false);
+        }
     }
 
     onEditPress() {

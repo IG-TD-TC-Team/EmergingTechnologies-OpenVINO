@@ -247,6 +247,72 @@ tr:hover td { background: #243044; }
   letter-spacing: .02em;
 }
 
+/* ── ASR Transcription tab ────────────────────────────────────────────── */
+.asr-run {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: .4rem;
+  padding: .65rem .85rem;
+  display: flex;
+  flex-direction: column;
+  gap: .4rem;
+}
+
+.asr-run-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: .72rem;
+}
+
+.asr-run-file {
+  color: #93c5fd;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.asr-run-model {
+  color: #64748b;
+  flex-shrink: 0;
+  margin-left: .5rem;
+}
+
+.asr-run-text-row {
+  display: flex;
+  align-items: baseline;
+  gap: .55rem;
+}
+
+.asr-run-label {
+  display: inline-block;
+  font-size: .62rem;
+  font-weight: 700;
+  letter-spacing: .04em;
+  padding: .05rem .4rem;
+  border-radius: .2rem;
+  flex-shrink: 0;
+  margin-top: .1rem;
+}
+
+.asr-label-asr { background: #064e3b; color: #6ee7b7; }
+.asr-label-ref { background: #1c1917; color: #a8a29e; }
+
+.asr-run-transcript {
+  font-size: .88rem;
+  color: #e2e8f0;
+  line-height: 1.55;
+  word-break: break-word;
+}
+
+.asr-run-reference {
+  font-size: .82rem;
+  color: #94a3b8;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
 /* ── Model catalogue ────────────────────────────────────────────────── */
 
 .catalogue-page {

@@ -64,21 +64,30 @@ models:
     label: Whisper Medium — OpenVINO INT8
     model_path: models/whisper-medium-ov
     hub_id: openai/whisper-medium
-  medgemma_4b_it:
-    enabled: true
-    type: slm
-    class: src.slm.generic_openvino.GenericSLMOpenVINO
-    label: MedGemma 1.5 4B — OpenVINO INT8
-    model_path: models/medgemma-4b-it
-    hub_id: google/medgemma-1.5-4b-it
-    max_new_tokens: 512
-    chat_format: gemma
-  medgemma_4b_it_pytorch:
+  qwen2_5_1_5b_int8_pytorch:
     enabled: true
     type: slm
     class: src.slm.generic_pytorch.GenericSLMPyTorch
-    label: MedGemma 1.5 4B — PyTorch FP32
-    model_path: models/medgemma-4b-it-pytorch
-    hub_id: google/medgemma-1.5-4b-it
+    label: Qwen 2.5 1.5B — PyTorch FP32
+    model_path: models/qwen2.5-1.5b-int8-pytorch
+    hub_id: Qwen/Qwen2.5-1.5B-Instruct
     max_new_tokens: 512
-    chat_format: gemma
+    chat_format: llama3
+  qwen2_5_1_5b_int8:
+    enabled: true
+    type: slm
+    class: src.slm.generic_openvino.GenericSLMOpenVINO
+    label: Qwen 2.5 1.5B — OpenVINO INT8
+    model_path: models/qwen2.5-1.5b-int8
+    hub_id: Qwen/Qwen2.5-1.5B-Instruct
+    max_new_tokens: 512
+    chat_format: llama3
+  qwen2_5_7b_int4:
+    enabled: true
+    type: slm
+    class: src.slm.generic_openvino.GenericSLMOpenVINO
+    label: Qwen 2.5 7B — OpenVINO INT4
+    model_path: models/qwen2.5-7b-int4
+    hub_id: Qwen/Qwen2.5-7B-Instruct
+    max_new_tokens: 512
+    chat_format: llama3

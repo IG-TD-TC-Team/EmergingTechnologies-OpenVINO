@@ -170,9 +170,16 @@ class NetworkMonitorClass {
       );
     } catch (_) {
       console.warn(
-        '[NetworkMonitor] @react-native-community/netinfo not available — falling back to web listener'
+        '[NetworkMonitor] @react-native-community/netinfo not available'
       );
-      this._startWebListener();
+      if (Platform.OS === 'web') {
+        this._startWebListener();
+      } else {
+        // Native without NetInfo — optimistic default, no event-driven updates.
+        this._isOnline = true;
+        this._prevOnline = true;
+        this._unsubscribe = () => {};
+      }
     }
   }
 

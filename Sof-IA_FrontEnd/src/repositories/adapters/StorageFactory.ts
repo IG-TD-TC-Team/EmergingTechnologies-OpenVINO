@@ -66,6 +66,7 @@ export interface PerformanceMetrics {
 
 export class StorageFactory {
   private static instance: IRepository | null = null;
+  private static _initPromise: Promise<IRepository> | null = null;
   private static config: StorageConfig = {};
   private static adapterType: AdapterType | null = null;
   private static platformCapabilities: PlatformCapabilities | null = null;
@@ -100,6 +101,21 @@ export class StorageFactory {
       await this.destroy();
     }
 
+    // Guard against concurrent calls before this.instance is set.
+    // All callers that arrive while initialization is in flight share the same promise.
+    if (this._initPromise && !config) {
+      return this._initPromise;
+    }
+
+    this._initPromise = this._doCreate(config);
+    try {
+      return await this._initPromise;
+    } finally {
+      this._initPromise = null;
+    }
+  }
+
+  private static async _doCreate(config?: Partial<StorageConfig>): Promise<IRepository> {
     // Merge with defaults and validate
     this.config = mergeConfig(config);
     validateConfig(this.config);
@@ -444,6 +460,7 @@ export class StorageFactory {
    */
   static reset(): void {
     this.instance = null;
+    this._initPromise = null;
     this.config = {};
     this.adapterType = null;
     this.platformCapabilities = null;

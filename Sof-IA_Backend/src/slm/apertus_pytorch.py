@@ -95,7 +95,7 @@ class ApertusPyTorch(StreamingSLMBase):
             tokenizer.save_pretrained(str(local_path))
             model = AutoModelForCausalLM.from_pretrained(
                 self.hub_id,
-                dtype=torch.bfloat16,
+                torch_dtype=torch.bfloat16,
                 low_cpu_mem_usage=True,
             )
             model.save_pretrained(str(local_path))
@@ -103,7 +103,7 @@ class ApertusPyTorch(StreamingSLMBase):
         self._tokenizer = AutoTokenizer.from_pretrained(self.model_path)
         self._model = AutoModelForCausalLM.from_pretrained(
             self.model_path,
-            dtype=torch.bfloat16,
+            torch_dtype=torch.bfloat16,
             low_cpu_mem_usage=True,
         )
 

@@ -201,5 +201,33 @@ const API = (() => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ catalogue_id: catalogueId, compression, hf_token: hfToken, variant }),
     }),
+
+    /**
+     * Upload an audio file for ASR transcription with the selected model.
+     * Returns a job UUID; stream result via {@link API.streamJob}.
+     *
+     * @param {File}   file     - Audio file from a file input or drop event.
+     * @param {string} modelId  - ASR model registry key.
+     * @returns {Promise<{job_id: string}>}
+     */
+    startTranscription: (file, modelId) => {
+      const fd = new FormData();
+      fd.append('audio', file);
+      fd.append('model_id', modelId);
+      return _fetch('/api/transcription/file', { method: 'POST', body: fd });
+    },
+
+    /**
+     * Transcribe one of the curated benchmark audio samples.
+     *
+     * @param {string} modelId    - ASR model registry key.
+     * @param {string} audioPath  - Relative path from /api/audio/samples (e.g. data/benchmark/…/sample_00.wav).
+     * @returns {Promise<{job_id: string}>}
+     */
+    startTranscriptionSample: (modelId, audioPath) => _fetch('/api/transcription/sample', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model_id: modelId, audio_path: audioPath }),
+    }),
   });
 })();

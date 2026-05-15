@@ -1,3 +1,19 @@
+// Pure-JS polyfill for crypto.getRandomValues.
+// uuid v13 requires this API; neither react-native-get-random-values nor expo-crypto
+// work in Expo Go without a native rebuild. Math.random() is sufficient for local
+// SQLite record IDs — the app will never generate enough rows to risk a collision.
+if (!globalThis.crypto) {
+  globalThis.crypto = {};
+}
+if (typeof globalThis.crypto.getRandomValues !== 'function') {
+  globalThis.crypto.getRandomValues = (array) => {
+    for (let i = 0; i < array.length; i++) {
+      array[i] = Math.floor(Math.random() * 256);
+    }
+    return array;
+  };
+}
+
 import { registerRootComponent } from 'expo';
 
 // Import early so TaskManager.defineTask() is called before registerRootComponent.

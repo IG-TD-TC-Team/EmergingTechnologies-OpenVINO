@@ -121,7 +121,10 @@ function AllergiesContent({ items }) {
     );
 }
 
-function CardContent({ card, narrative }) {
+function CardContent({ card, narrative, editedValue }) {
+    if (editedValue != null) {
+        return <NarrativeContent narrative={{ transcript: editedValue, sections: null }} />;
+    }
     switch (card?.type) {
         case 'recent_activity': return <TranscriptionContent segments={card.segments} narrative={narrative} />;
         case 'vital_signs':     return <VitalSignsContent    data={card.data}  />;
@@ -194,6 +197,7 @@ function CardDetailScreen({ route, navigation }) {
     const [narrative, setNarrative]         = useState({ transcript: null, sections: null });
     const [copyToastVisible, setCopyToastVisible] = useState(false);
     const [isEdited, setIsEdited]           = useState(false);
+    const [editedValue, setEditedValue]     = useState(null);
 
     const presenterRef = useRef(null);
 
@@ -203,6 +207,7 @@ function CardDetailScreen({ route, navigation }) {
             setMetadata,
             setNarrative,
             setIsEdited,
+            setEditedValue,
             showCopyToast: () => {
                 setCopyToastVisible(true);
                 setTimeout(() => setCopyToastVisible(false), 2000);
@@ -291,7 +296,7 @@ function CardDetailScreen({ route, navigation }) {
 
             {/* Card content */}
             <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
-                <CardContent card={card} narrative={narrative} />
+                <CardContent card={card} narrative={narrative} editedValue={editedValue} />
             </ScrollView>
 
             {/* Copy toast */}

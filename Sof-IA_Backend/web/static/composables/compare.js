@@ -142,13 +142,6 @@ class CompareStore {
     const wa2 = a.metrics?.words_per_sec,  wb2 = b.metrics?.words_per_sec;
     if (wa2 != null && wb2 != null) _addRow('Words per second', wa2, wb2, 'w/s', false, 2);
 
-    const pa = a.metrics?.peak_memory_mb,  pb  = b.metrics?.peak_memory_mb;
-    if (pa != null && pb != null) _addRow('Peak working set', pa, pb, 'MB');
-
-    const la2 = a.metrics?.load_memory_mb,  lb2 = b.metrics?.load_memory_mb;
-    if (la2 != null && lb2 != null) _addRow('Model load RSS delta', la2, lb2, 'MB');
-
-
     const wa = a.metrics?.wer,             wb  = b.metrics?.wer;
     if (wa != null && wb != null) {
       const waP = wa * 100, wbP = wb * 100, diff = waP - wbP;

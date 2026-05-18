@@ -227,7 +227,7 @@ function DashboardScreen({ navigation, route }) {
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
-          onPress={() => navigation.goBack()}
+          onPress={() => navigation.canGoBack() ? navigation.goBack() : navigation.navigate('ModeSelection')}
           accessibilityLabel="Go back"
         >
           <SvgXml xml={arrowBackSvg} width={24} height={24} />

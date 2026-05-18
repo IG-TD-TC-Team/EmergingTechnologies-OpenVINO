@@ -19,8 +19,6 @@ import {
   TouchableOpacity,
   View,
   ScrollView,
-  Switch,
-  Alert,
 } from 'react-native';
 import { SvgXml } from 'react-native-svg';
 import {
@@ -57,49 +55,6 @@ export default function SettingsScreen({ navigation }) {
   const handleResetApiUrl = async () => {
     await ApiConfigService.reset();
     setApiUrl(ApiConfigService.getDefault());
-  };
-
-  // Settings state
-  const [backgroundSyncEnabled, setBackgroundSyncEnabled] = useState(false);
-  const [autoExportEnabled, setAutoExportEnabled] = useState(false);
-
-  // Handlers
-  const handleExportRecordings = () => {
-    Alert.alert(
-      'Export Recordings',
-      'This will export all recordings to your device storage.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Export',
-          onPress: () => console.log('[Settings] Exporting recordings...'),
-        },
-      ]
-    );
-  };
-
-  const handleImportData = () => {
-    Alert.alert(
-      'Import Data',
-      'Select a backup file to import.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Select File',
-          onPress: () => console.log('[Settings] Opening file picker...'),
-        },
-      ]
-    );
-  };
-
-  const handleBackgroundSyncToggle = (value) => {
-    setBackgroundSyncEnabled(value);
-    console.log(`[Settings] Background sync: ${value ? 'enabled' : 'disabled'}`);
-  };
-
-  const handleAutoExportToggle = (value) => {
-    setAutoExportEnabled(value);
-    console.log(`[Settings] Auto-export: ${value ? 'enabled' : 'disabled'}`);
   };
 
   return (
@@ -170,79 +125,6 @@ export default function SettingsScreen({ navigation }) {
             </TouchableOpacity>
           </View>
         </View>
-
-        {/* File Management - ONLY on Android/iOS */}
-        {capabilities.hasFileSystem && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>File Management</Text>
-            <Text style={styles.sectionDescription}>
-              Export and import your recordings and data
-            </Text>
-
-            <TouchableOpacity
-              style={styles.button}
-              onPress={handleExportRecordings}
-            >
-              <Text style={styles.buttonText}>📦 Export Recordings</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.button}
-              onPress={handleImportData}
-            >
-              <Text style={styles.buttonText}>📥 Import Data</Text>
-            </TouchableOpacity>
-
-            <View style={styles.settingRow}>
-              <View style={styles.settingInfo}>
-                <Text style={styles.settingLabel}>Auto-Export</Text>
-                <Text style={styles.settingHint}>
-                  Automatically export recordings weekly
-                </Text>
-              </View>
-              <Switch
-                value={autoExportEnabled}
-                onValueChange={handleAutoExportToggle}
-                trackColor={{ false: '#E0E0E0', true: '#6B6EDF' }}
-                thumbColor="#FFFFFF"
-              />
-            </View>
-          </View>
-        )}
-
-        {/* Background Tasks - ONLY on Android/iOS */}
-        {capabilities.hasBackgroundTasks && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Background Sync</Text>
-            <Text style={styles.sectionDescription}>
-              Sync data with the server in the background
-            </Text>
-
-            <View style={styles.settingRow}>
-              <View style={styles.settingInfo}>
-                <Text style={styles.settingLabel}>Enable Background Sync</Text>
-                <Text style={styles.settingHint}>
-                  Sync when app is in background
-                </Text>
-              </View>
-              <Switch
-                value={backgroundSyncEnabled}
-                onValueChange={handleBackgroundSyncToggle}
-                trackColor={{ false: '#E0E0E0', true: '#6B6EDF' }}
-                thumbColor="#FFFFFF"
-              />
-            </View>
-
-            {backgroundSyncEnabled && (
-              <View style={styles.infoBox}>
-                <Text style={styles.infoText}>
-                  ℹ️ Background sync will use battery and data. The app will
-                  sync automatically when connected to WiFi.
-                </Text>
-              </View>
-            )}
-          </View>
-        )}
 
         {/* Service Worker - ONLY on Web */}
         {isWeb && (

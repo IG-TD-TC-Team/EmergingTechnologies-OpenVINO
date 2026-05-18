@@ -329,7 +329,7 @@ Runs on **Android** (primary) and **Chrome/Web** (fallback).
 src/
 ├── models/             # Plain data classes: Patient, Session, ClinicalNote, Transcription
 ├── repositories/
-│   ├── interfaces/     # IStorageRepository, IPatientRepository (contracts)
+│   ├── interfaces/     # IStorageRepository (contracts)
 │   ├── adapters/       # SQLiteRepository (Android), IndexedDBRepository (Web)
 │   └── PatientRepository.js
 ├── services/

@@ -38,10 +38,6 @@ class ModeSelectionPresenter {
     }
   }
 
-  onFirstSteps() {
-    // Future feature — disabled in v1
-  }
-
   onCustomizeSofia(navigation) {
     navigation.navigate('Settings');
   }

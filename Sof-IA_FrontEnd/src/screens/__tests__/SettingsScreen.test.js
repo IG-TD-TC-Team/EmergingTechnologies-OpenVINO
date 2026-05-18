@@ -46,40 +46,6 @@ describe('SettingsScreen', () => {
   });
 
   describe('Android Platform', () => {
-    it('should show file management section on Android', () => {
-      const { getByText } = render(
-        <CapabilitiesProvider value={androidCapabilities}>
-          <SettingsScreen navigation={mockNavigation} />
-        </CapabilitiesProvider>
-      );
-
-      expect(getByText('File Management')).toBeTruthy();
-      expect(getByText(/Export and import your recordings/i)).toBeTruthy();
-    });
-
-    it('should show export and import buttons on Android', () => {
-      const { queryByText } = render(
-        <CapabilitiesProvider value={androidCapabilities}>
-          <SettingsScreen navigation={mockNavigation} />
-        </CapabilitiesProvider>
-      );
-
-      expect(queryByText('📦 Export Recordings')).toBeTruthy();
-      expect(queryByText('📥 Import Data')).toBeTruthy();
-    });
-
-    it('should show background sync section on Android', () => {
-      const { getByText } = render(
-        <CapabilitiesProvider value={androidCapabilities}>
-          <SettingsScreen navigation={mockNavigation} />
-        </CapabilitiesProvider>
-      );
-
-      expect(getByText('Background Sync')).toBeTruthy();
-      expect(getByText(/Sync data with the server/i)).toBeTruthy();
-      expect(getByText('Enable Background Sync')).toBeTruthy();
-    });
-
     it('should NOT show service worker section on Android', () => {
       const { queryByText } = render(
         <CapabilitiesProvider value={androidCapabilities}>
@@ -285,14 +251,12 @@ describe('SettingsScreen', () => {
         </CapabilitiesProvider>
       );
 
-      // Android should have: Platform Info, Server Connection, File Management, Background Sync
+      // Android should have: Platform Info, Server Connection
       // Web should have: Platform Info, Server Connection, Offline Mode
 
       const androidSections = [
         'Platform Information',
         'Server Connection',
-        'File Management',
-        'Background Sync',
       ];
 
       const webSections = [

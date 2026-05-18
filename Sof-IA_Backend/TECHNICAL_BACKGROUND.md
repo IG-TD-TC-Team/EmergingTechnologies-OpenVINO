@@ -234,13 +234,11 @@ Including Phi-3 alongside 7-8B models serves two purposes:
 
 ---
 
-## Exploring the Side Quests
+## CLI Script Reference
 
-**ADD Apertus openvino coversion** --> no known transformation guide for Apertus 8B yet, but the torch.export + KV wrapper approach should work in theory. This is a future experiment to validate the generality of the export pipeline on an unknown architecture.
-TODO: 
-While the main focus of this project is benchmarking and implementing a clinical voice-to-text pipeline on CPU, the Whisper and Phi-3 implementations serve as **side quests** — additional experiments demonstrating the versatility of the OpenVINO pipeline across different model architectures.
+Whisper and Phi-3 are the **core benchmarked models** in this project. Beyond the web dashboard, standalone CLI scripts let you run conversions, transcriptions, and comparisons directly from the command line.
 
-These are **not part of the core benchmark suite** but are fully functional implementations you can explore independently.
+The Apertus 8B OpenVINO export was the novel engineering challenge — no prior conversion guide existed for that architecture. The `torch.export` + KV-cache wrapper approach (Path B in the export pipeline section) was developed specifically for it and is now complete.
 
 ### Quick Start: Whisper ASR
 

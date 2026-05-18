@@ -1,109 +1,63 @@
-# Model Manager — Web UI for downloading & converting models
+# Documentation Audit — Backend Markdown
 
-**Story**: As a colleague, I want to add new AI models to the benchmark via the web interface so that I don't need to run Python scripts in the terminal.
+## Context
 
-**Sprint**: Post-sprint improvement
-**Context**: Benchmark dashboard currently requires manual terminal work to add models. This adds a **Models** tab where colleagues see a curated catalogue, check what's already on disk, and one-click download + convert to OpenVINO with live progress.
+Audit of all backend `.md` files (`README.md`, `TECHNICAL_BACKGROUND.md`, `PROJECT_PRESENTATION.md`, `OPENVINO_PRESENTATION.md`, `BENCHMARK_HOWTO.md`) against the actual codebase state revealed stale references, missing entries, raw developer notes, and empty sections. Tasks below are grouped by file.
 
 ---
 
-## Decision Log
+## README.md
 
-| Decision | Rationale |
-|----------|-----------|
-| Curated catalogue (not open HF search) | Colleagues only see known-good models; no risk of trying unsupported architectures |
-| Reuse existing SSE job system | `jobs.py` + `QueueProgressChannel` already handle background tasks + SSE streaming |
-| `main_export` for SLM INT8 | Same approach as `convert_phi3_int8.py`; stable and tested |
-| `OVWeightQuantizationConfig(bits=4)` for INT4 | Pattern from `apertus_openvino.py`; required for >5B models |
-| `GenericSLMOpenVINO` class for LLaMA/Qwen | No existing class for these architectures; one generic wrapper covers all standard causal LMs |
-| Yaml key = `id.replace("-", "_")` | Consistent with existing naming (`phi3_openvino`, `whisper_openvino`) |
+| Task | Issue | Status |
+|------|-------|--------|
+| D1 | **API Endpoints table incomplete** — missing 8 endpoints added since the table was written: `POST /api/chat`, `DELETE /api/chat`, `GET /api/chat/history`, `POST /api/transcription/file`, `POST /api/transcription/sample`, `GET /api/catalogue`, `POST /api/catalogue/download`, `POST /api/voice/transcribe-and-structure` | Done |
+| D2 | **Composables list incomplete** — `web/static/composables/` section shows only 5 files; missing `logs.js`, `chat.js`, `catalogue.js`, `transcription.js` | Done |
+| D3 | **`web/` structure missing `sessions.py`** — file exists (`web/sessions.py` — in-memory session store for Chat) but is not listed in the repository tree | Done |
+| D4 | **OpenVINO version wrong** — "Technologies Used" says `OpenVINO 2024.x`; installed packages are `2026.1.0.0` | Done |
+| D5 | **Repository root label wrong** — tree header shows `OpenVino/` but the actual directory is `Sof-IA_Backend/` | Won't fix — intentional |
+
+---
+
+## TECHNICAL_BACKGROUND.md
+
+| Task | Issue | Status |
+|------|-------|--------|
+| D6 | **"Exploring the Side Quests" section framing is backwards** — the section declares Whisper and Phi-3 are "side quests not part of the core benchmark suite", but they are the core benchmarks. Apertus 8B was the experimental work. The section needs to be restructured to reflect what was actually the main project vs the experiment. | Done |
+| D7 | **Raw developer notes left in document** — lines 239–241 contain unfinalised inline notes (`ADD Apertus openvino coversion --> ...` and `TODO:`) that were never removed or turned into proper content. Apertus OpenVINO export is now complete and benchmarked — these notes are stale and should be rewritten as a brief retrospective on the export challenge. | Done |
+
+---
+
+## PROJECT_PRESENTATION.md
+
+| Task | Issue | Status |
+|------|-------|--------|
+| D8 | **Sections 6, 7, and 8 are empty** — "End-to-End Pipeline Implementation", "Demonstration Results", and "Conclusion" exist as headings with no body content. Either fill them or remove the headings. | Deferred — to discuss with team |
+| D9 | **RTF missing from metrics list** — Section 3 "Metrics collected" lists latency, memory, WER but omits Real-Time Factor (RTF), which appears as a key result metric in Section 4 and throughout BENCHMARK_HOWTO.md. | Done |
+
+---
+
+## OPENVINO_PRESENTATION.md
+
+No functional incoherences found. The document is self-contained theory and references, not coupled to the codebase state.
+
+---
+
+## BENCHMARK_HOWTO.md
+
+No issues — updated 2026-05-18 to reflect the full web interface.
 
 ---
 
 ## Execution Order
 
-| Step | File(s) | Change | Status |
-|------|---------|--------|--------|
-| T1 | `plan.md` | Reset to plan template | Done |
-| T2a | `src/model_manager/__init__.py` | Empty package init | Done |
-| T2b | `src/model_manager/catalogue.py` | 13-model curated list | Done |
-| T2c | `src/model_manager/disk.py` | `get_model_status()` — checks disk for OV/PyTorch files | Done |
-| T3a | `src/slm/generic_openvino.py` | `GenericSLMOpenVINO` — reusable causal LM class for LLaMA/Qwen | Done |
-| T3b | `src/model_manager/downloader.py` | `download_and_convert()` — main_export (SLM) / OVModelForSpeechSeq2Seq (ASR) | Done |
-| T3c | `src/model_manager/registry.py` | `add_model_to_yaml()` — inserts new entry in models.yaml | Done |
-| T4 | `web/server.py` | `GET /api/catalogue` + `POST /api/catalogue/download` | Done |
-| T5 | `web/static/api.js` | `fetchCatalogue()` + `startModelDownload()` | Done |
-| T6 | `web/static/composables/catalogue.js` | `CatalogueStore` — fetch, startDownload, SSE stream handler | Done |
-| T7 | `web/static/app.css` | `.model-card`, `.model-card.available`, `.model-card.downloading` pulse | Done |
-| T8a | `web/static/index.html` | Models mode HTML: nav button + two-column catalogue layout | Done |
-| T8b | `web/static/app.js` | Instantiate `CatalogueStore`, expose to template, mount init | Done |
+Suggested order (D1–D5 are quick; D6–D9 require writing):
 
----
-
-## Catalogue — 13 models
-
-| id | hub_id | type | size | compression options |
-|----|--------|------|------|---------------------|
-| whisper-tiny-ov | openai/whisper-tiny | asr | 0.15 GB | int8 |
-| whisper-base-ov | openai/whisper-base | asr | 0.30 GB | int8 |
-| whisper-small-ov | openai/whisper-small | asr | 0.60 GB | int8 |
-| whisper-medium-ov *(on disk)* | openai/whisper-medium | asr | 1.50 GB | int8 |
-| whisper-large-ov | openai/whisper-large-v2 | asr | 3.10 GB | int8 |
-| phi3-mini-4k-int8 *(on disk)* | microsoft/Phi-3-mini-4k-instruct | slm | 2.1 GB | int8 |
-| phi3-small-8k-int8 | microsoft/Phi-3-small-8k-instruct | slm | 4.1 GB | int8 |
-| apertus-8b-int4 *(on disk)* | swiss-ai/Apertus-8B-Instruct-2509 | slm | 4.9 GB | int4 |
-| llama-3.2-1b-int8 | meta-llama/Llama-3.2-1B-Instruct | slm | 0.7 GB | int8 |
-| llama-3.2-3b-int8 | meta-llama/Llama-3.2-3B-Instruct | slm | 2.0 GB | int8 |
-| qwen2.5-1.5b-int8 | Qwen/Qwen2.5-1.5B-Instruct | slm | 1.0 GB | int8 |
-| qwen2.5-3b-int8 | Qwen/Qwen2.5-3B-Instruct | slm | 2.1 GB | int8 |
-| qwen2.5-7b-int4 | Qwen/Qwen2.5-7B-Instruct | slm | 4.5 GB | int4, int8 |
-
----
-
-## Key technical details
-
-### Status detection (disk.py)
-- `downloaded_ov` — `models/<id>/openvino_model.xml` exists
-- `downloaded_pytorch` — `models/<id>/config.json` + at least one `*.safetensors` exists
-- `available` — nothing on disk
-
-### Conversion approach (downloader.py)
-- **SLM INT8**: `main_export(hub_id, output=target_dir, task="text-generation-with-past")`
-- **SLM INT4**: `OVModelForCausalLM.from_pretrained(hub_id, export=True, quantization_config=OVWeightQuantizationConfig(bits=4, sym=True, ratio=1.0, group_size=-1))`
-- **ASR**: `OVModelForSpeechSeq2Seq.from_pretrained(hub_id, export=True)` + save `AutoProcessor`
-- Progress reported via `channel.send_progress(msg)` at each step
-
-### Registry (registry.py)
-- Reads `config/models.yaml`, appends new entry, writes back
-- Yaml key = `catalogue_id.replace("-", "_")`
-- Entry mirrors existing schema (type, class, label, model_path, hub_id, enabled, max_new_tokens, chat_format)
-
-### SSE reuse
-- `POST /api/catalogue/download` returns `{job_id}`
-- Frontend subscribes to existing `GET /api/benchmark/{job_id}/stream`
-- No new SSE endpoint needed
-
-### New model class (generic_openvino.py)
-- Mirrors `Phi3OpenVINO` exactly but with no hardcoded hub_id default
-- Used for: llama-3.2-1b, llama-3.2-3b, qwen2.5-*
-- `chat_format` from yaml config passed at runtime (not in class — handled by server.py formatter)
-
----
-
-## Verification
-
-1. `uvicorn web.server:app --reload --port 8000`
-2. Open `http://localhost:8000` → click **Models** tab
-3. Whisper medium, Phi-3, Apertus show white (active); others grey (available)
-4. Click "Download & Convert" on `whisper-tiny-ov` → live log appears in left panel
-5. On completion: card turns white, model appears in Benchmark dropdown
-6. `GET /api/catalogue` → all 13 entries with correct `status` field
-
----
-
-## Out of Scope
-
-- Open HuggingFace search (free-text query)
-- Model deletion from UI
-- Editing existing models.yaml entries via UI
-- Special-case architectures (Apertus, Voxtral) — those already have their own scripts
+1. D5 — fix repo root label (one word)
+2. D4 — fix OpenVINO version number
+3. D3 — add `sessions.py` to web/ tree
+4. D2 — add 4 missing composables to web/static/composables/ tree
+5. D1 — add 8 missing API endpoints to table
+6. D9 — add RTF to metrics list in PROJECT_PRESENTATION.md §3
+7. D7 — remove/rewrite raw TODO notes in TECHNICAL_BACKGROUND.md
+8. D6 — restructure "Side Quests" section framing
+9. D8 — fill or remove empty sections 6/7/8 in PROJECT_PRESENTATION.md

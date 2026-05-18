@@ -150,7 +150,15 @@ BaseModel  (ABC)
 | `GET` | `/api/benchmark/{job_id}` | Poll job status (fallback if SSE unavailable) |
 | `POST` | `/api/live/slm` | Start token-by-token SLM streaming job |
 | `POST` | `/api/live/asr` | Start chunk-by-chunk ASR streaming job |
-| `GET` | `/api/logs` | Last N structured log entries |
+| `GET` | `/api/logs` | Last N structured log entries (filterable by level) |
+| `POST` | `/api/chat` | Send a message and start a streaming SLM response → returns `{job_id}` |
+| `DELETE` | `/api/chat` | Clear the in-memory chat session |
+| `GET` | `/api/chat/history` | Return the current conversation as a list of messages |
+| `POST` | `/api/transcription/file` | Upload an audio file (WAV/MP3/M4A/OGG/WebM/FLAC) for ASR → returns `{job_id}` |
+| `POST` | `/api/transcription/sample` | Transcribe a curated benchmark sample by path → returns `{job_id}` |
+| `GET` | `/api/catalogue` | Return the model catalogue merged with local disk status |
+| `POST` | `/api/catalogue/download` | Start a background download + OpenVINO conversion job → returns `{job_id}` |
+| `POST` | `/api/voice/transcribe-and-structure` | Full voice pipeline — transcribe audio chunk and extract structured clinical data |
 
 ---
 
@@ -209,6 +217,7 @@ OpenVino/
 ├── web/
 │   ├── server.py                      ← FastAPI app (all endpoints + SSE)
 │   ├── jobs.py                        ← In-memory job store (PENDING → RUNNING → DONE/FAILED)
+│   ├── sessions.py                    ← In-memory chat session store (multi-turn history)
 │   ├── middleware.py                  ← Request logging middleware
 │   └── static/
 │       ├── index.html                 ← HTML skeleton — mounts Vue app
@@ -220,7 +229,11 @@ OpenVino/
 │           ├── benchmark.js           ← BenchmarkStore
 │           ├── history.js             ← HistoryStore
 │           ├── compare.js             ← CompareStore
-│           └── chart.js               ← ChartStore (Chart.js)
+│           ├── chart.js               ← ChartStore (Chart.js)
+│           ├── logs.js                ← LogsStore (server log viewer, auto-refresh)
+│           ├── chat.js                ← ChatStore (multi-turn SLM chat, streaming)
+│           ├── catalogue.js           ← CatalogueStore (model download + conversion)
+│           └── transcription.js       ← TranscriptionStore (ASR sample runner)
 │
 └── requirements.txt
 ```
@@ -229,7 +242,7 @@ OpenVino/
 
 ## Technologies Used
 
-- **OpenVINO 2024.x** — Intel inference optimization toolkit
+- **OpenVINO 2026.x** — Intel inference optimization toolkit
 - **optimum-intel** — HuggingFace bridge for OpenVINO model export and inference
 - **PyTorch** — Baseline framework for comparison
 - **NNCF** — Neural Network Compression Framework (INT8/INT4 weight quantization)

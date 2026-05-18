@@ -96,6 +96,7 @@ To validate this, we built a **benchmarking framework** comparing:
 - Latency (mean, p50, p95)
 - Memory usage (load + inference)
 - WER (Word Error Rate) for ASR quality
+- RTF (Real-Time Factor) — transcription time ÷ audio duration (< 1.0 = faster than real-time)
 
 ➡️ **See:** [BENCHMARK_HOWTO.md](./BENCHMARK_HOWTO.md) for detailed instructions on running benchmarks
 

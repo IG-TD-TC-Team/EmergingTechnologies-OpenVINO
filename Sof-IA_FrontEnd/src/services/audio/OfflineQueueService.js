@@ -115,9 +115,11 @@ const OfflineQueueService = {
 
     try {
       const storage = await getStorage();
-      const pending = await storage.query('recording_queue', (r) =>
-        r.status === 'pending' || r.status === 'retrying'
-      );
+      const [pendingItems, retryingItems] = await Promise.all([
+        storage.findByField('recording_queue', 'status', 'pending'),
+        storage.findByField('recording_queue', 'status', 'retrying'),
+      ]);
+      const pending = [...pendingItems, ...retryingItems];
 
       if (pending.length === 0) {
         this._draining = false;
@@ -131,10 +133,11 @@ const OfflineQueueService = {
       }
 
       // Check if any remain
-      const remaining = await storage.query('recording_queue', (r) =>
-        r.status === 'pending' || r.status === 'retrying'
-      );
-      if (remaining.length === 0) this._emit('online');
+      const [remainPending, remainRetrying] = await Promise.all([
+        storage.findByField('recording_queue', 'status', 'pending'),
+        storage.findByField('recording_queue', 'status', 'retrying'),
+      ]);
+      if (remainPending.length === 0 && remainRetrying.length === 0) this._emit('online');
     } catch (err) {
       console.error('[OfflineQueue] Drain error:', err);
     } finally {

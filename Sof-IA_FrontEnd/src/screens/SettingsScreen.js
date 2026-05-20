@@ -12,7 +12,6 @@
 
 import React, { useEffect, useState } from 'react';
 import {
-  SafeAreaView,
   StyleSheet,
   Text,
   TextInput,
@@ -20,6 +19,7 @@ import {
   View,
   ScrollView,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { SvgXml } from 'react-native-svg';
 import {
   useCapabilities,

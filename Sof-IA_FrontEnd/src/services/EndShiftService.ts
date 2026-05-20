@@ -229,7 +229,7 @@ class EndShiftService {
   private async _deleteNativeFiles(recordings: any[], errors: string[]): Promise<void> {
     let FileSystem: any;
     try {
-      FileSystem = require('expo-file-system');
+      FileSystem = require('expo-file-system/legacy');
     } catch {
       console.warn('[EndShiftService] expo-file-system unavailable — skipping native file deletion');
       return;

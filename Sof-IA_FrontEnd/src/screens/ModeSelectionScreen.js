@@ -1,12 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  SafeAreaView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { SvgXml } from 'react-native-svg';
 import ModeSelectionPresenter from '../presenters/ModeSelectionPresenter';
 

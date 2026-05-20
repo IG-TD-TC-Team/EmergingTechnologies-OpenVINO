@@ -70,7 +70,7 @@
  * ──────────────────────────────────────────────────────────────────────────────
  */
 
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { v4 as uuidv4 } from 'uuid';
 import { getStorage } from '../repositories';
 import { capabilities } from '../config/capabilities';
@@ -151,6 +151,7 @@ const TranscriptionService = {
       const blob = await this._readBlobFromDexie(filePath);
       formData.append('audio', blob, 'chunk.webm');
     } else {
+      if (!filePath) throw new Error('Native audio upload requires a file path');
       const filename = filePath.split('/').pop();
       formData.append('audio', {
         uri: filePath,

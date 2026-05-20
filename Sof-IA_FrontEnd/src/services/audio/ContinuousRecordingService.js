@@ -20,6 +20,7 @@ import AudioSourceResolver from './AudioSourceResolver';
 import ExpoAvRecordingStrategy from './ExpoAvRecordingStrategy';
 import WebMediaRecordingStrategy from './WebMediaRecordingStrategy';
 import TranscriptionService from '../TranscriptionService';
+import SessionService from '../SessionService';
 import ChunkUploadService from './ChunkUploadService';
 import OfflineQueueService from './OfflineQueueService';
 import OfflineQueueManager from '../queue/OfflineQueueManager';
@@ -69,15 +70,29 @@ const ContinuousRecordingService = {
       if (raw) {
         const saved = JSON.parse(raw);
         if (saved.isRecording && saved.sessionId) {
-          console.log('[ContinuousRecording] Restoring recording state for session:', saved.sessionId);
-          // Emit immediately for <200ms UI restore
-          this._isRecording = true;
-          this._sessionId = saved.sessionId;
-          this._patientId = saved.patientId ?? null;
-          this._chunkIndex = saved.chunkIndex ?? 0;
-          this._emit(true, 'online');
-          // Resume the chunk loop
-          await this._startChunkLoop();
+          // Only restore if this is still the active session.
+          // Guards against restarting the mic loop when the user has already
+          // started a new shift (stale AsyncStorage from the previous one).
+          const activeSessionId = await SessionService.getActiveSessionId();
+          if (activeSessionId !== saved.sessionId) {
+            await this._clearPersistedState();
+            console.log('[ContinuousRecording] Stale restore state cleared — session changed');
+          } else {
+            console.log('[ContinuousRecording] Restoring recording state for session:', saved.sessionId);
+            // Emit immediately for <200ms UI restore
+            this._isRecording = true;
+            this._sessionId = saved.sessionId;
+            this._patientId = saved.patientId ?? null;
+            this._chunkIndex = saved.chunkIndex ?? 0;
+            this._strategy = capabilities.isWeb
+              ? WebMediaRecordingStrategy
+              : ExpoAvRecordingStrategy;
+            const deviceId = capabilities.isWeb ? await this._resolveWebDeviceId() : null;
+            await this._strategy.prepare(saved.sessionId, deviceId);
+            this._emit(true, 'online');
+            // Resume the chunk loop
+            await this._startChunkLoop();
+          }
         }
       }
 

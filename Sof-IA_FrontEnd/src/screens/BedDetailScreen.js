@@ -3,12 +3,12 @@ import {
     Animated,
     FlatList,
     Platform,
-    SafeAreaView,
     StyleSheet,
     Text,
     TouchableOpacity,
     View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { SvgXml } from 'react-native-svg';
 import PatientDetailsPresenter from '../presenters/PatientDetailsPresenter';
 import { AudioSourceBadge, MicInputIcon } from './AudioSourceBadge';

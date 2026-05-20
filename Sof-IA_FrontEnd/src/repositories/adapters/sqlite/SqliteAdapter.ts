@@ -354,7 +354,7 @@ export class SqliteAdapter implements IRepository {
     const record: any = {};
 
     for (const [key, value] of Object.entries(row)) {
-      const camelKey = this.toCamelCase(key);
+      const camelKey = key; // keep snake_case to match TypeScript models and Dexie behavior
 
       // Boolean from integer
       if (typeof value === 'number' && (value === 0 || value === 1)) {

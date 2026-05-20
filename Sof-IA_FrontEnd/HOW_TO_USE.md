@@ -1,5 +1,7 @@
 # Unified Storage Interface - How to Use
 
+> **API reference:** For the complete `IRepository` interface, see [`src/repositories/USAGE.md`](./src/repositories/USAGE.md). This guide covers setup, common patterns, and troubleshooting.
+
 Complete guide for using the unified storage system in your React Native/Web app with automatic data cleanup and cross-platform support.
 
 ---
@@ -15,12 +17,6 @@ npm install --legacy-peer-deps
 ### 2. Run Tests
 ```bash
 npm test
-```
-
-Expected output:
-```
-Test Suites: 1 passed, 1 total
-Tests:       26 passed, 26 total
 ```
 
 ### 3. Start the App
@@ -66,7 +62,7 @@ const session = await storage.create('sessions', {
 });
 
 // READ
-const found = await storage.findById('sessions', session.id);
+const found = await storage.read('sessions', session.id);
 
 // UPDATE
 await storage.update('sessions', session.id, {
@@ -82,24 +78,22 @@ await storage.delete('sessions', session.id);
 ### Query Operations
 
 ```typescript
-// Find by field
+// Find all records where a field matches a value
 const activeSessions = await storage.findByField(
   'sessions',
   'status',
   'active'
 );
 
-// Find all with pagination
-const allSessions = await storage.findAll('sessions', {
-  limit: 50,
-  offset: 0
-});
+// Find all records for a session (shift-scoped query)
+const sessionPatients = await storage.queryBySession('patients', sessionId);
 
-// Count records
-const count = await storage.count('sessions');
-
-// Check existence
-const exists = await storage.exists('sessions', sessionId);
+// Find card-type records scoped to a session and bed
+const meds = await storage.queryBySessionAndBed(
+  'medications',
+  sessionId,
+  bedId
+);
 ```
 
 ### Relationships
@@ -130,39 +124,21 @@ const transcriptions = await storage.findByField(
 ### Bulk Operations
 
 ```typescript
-// Batch create
+// Batch create — create multiple records in parallel
 const patients = [
   { nombre: 'John', edad: 45, session_id: sessionId },
   { nombre: 'Jane', edad: 38, session_id: sessionId },
 ];
-await storage.batchCreate('patients', patients);
+await Promise.all(patients.map(p => storage.create('patients', p)));
 
-// Batch delete
-const ids = ['id1', 'id2', 'id3'];
-await storage.batchDelete('patients', ids);
-```
+// Bulk delete — delete all records matching a where clause
+await storage.bulkDelete('patients', { session_id: sessionId });
 
-### Transactions
-
-```typescript
-await storage.transaction(async (txStorage) => {
-  // Create patient
-  const patient = await txStorage.create('patients', patientData);
-
-  // Create recording
-  await txStorage.create('audio_recordings', {
-    patient_id: patient.id,
-    session_id: sessionId,
-    file_path: '/recordings/audio.mp3',
-    duration_ms: 120000,
-  });
-
-  // Update session stats
-  await txStorage.update('sessions', sessionId, {
-    patient_count: 1,
-  });
-
-  // All succeed or all fail (atomic)
+// Bulk delete with operator (e.g. old records)
+await storage.bulkDelete('audio_recordings', {
+  field: 'created_at',
+  operator: '<',
+  value: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
 });
 ```
 
@@ -237,12 +213,14 @@ console.log('Shift ended:', ended.ended_at);
 
 ### Automatic Data Cleanup (TTL)
 
-All records have a 12hours expiration. On app launch, `purgeExpired()` removes:
-- Sessions older than 12 hours
-- All related patients (CASCADE)
-- All related audio recordings (CASCADE)
-- All related transcriptions (CASCADE)
-- All related clinical notes (CASCADE)
+Records expire according to per-entity retention policies. On app launch, `purgeExpired()` removes all records whose `expires_at` has passed:
+
+| Entity | Retention |
+|--------|-----------|
+| Sessions | 30 days after shift ends |
+| Audio recordings | 7 days or end-of-shift |
+| Transcriptions | 14 hours from session start |
+| Patients / clinical notes | Purged when session expires |
 
 ```typescript
 // Called automatically in App.js on bootstrap
@@ -253,20 +231,22 @@ console.log(`Purged ${purgedCount} expired record(s)`);
 ### Manual Cleanup
 
 ```typescript
-// Purge specific table
+// Purge all expired records
 const count = await storage.purgeExpired();
 
-// Delete all records from a table
-const allIds = (await storage.findAll('patients')).map(p => p.id);
-await storage.batchDelete('patients', allIds);
+// Delete all records for a session
+await storage.bulkDelete('patients', { session_id: sessionId });
 ```
 
 ### Health Monitoring
 
 ```typescript
-const health = await storage.healthCheck();
+import { StorageFactory } from './src/repositories/adapters';
+
+const health = StorageFactory.getHealth();
 console.log('Storage healthy:', health.healthy);
-console.log('Tables:', health.tables);
+console.log('Last check:', health.lastCheck);
+console.log('Error count:', health.errorCount);
 ```
 
 ---
@@ -326,7 +306,7 @@ npm run test:coverage
 ```
 
 ### Test Checklist
-- [ ] `npm test` → 22+ tests pass
+- [ ] `npm test` → all tests pass
 - [ ] Start app on Web → Session persists
 - [ ] Start app on Android → Session persists
 - [ ] Close/reopen app → Auto-navigates to Dashboard
@@ -371,7 +351,7 @@ const count = await storage.purgeExpired();
 console.log('Purged:', count); // Should be 1
 
 // Verify deleted
-const found = await storage.findById('sessions', 'test_expired');
+const found = await storage.read('sessions', 'test_expired');
 console.log('Found:', found); // Should be null
 ```
 
@@ -401,25 +381,22 @@ async function findOrCreateSession(nurseName: string) {
 ### Pattern 2: Cascading Delete
 ```typescript
 async function deleteSessionAndRelated(sessionId: string) {
-  await storage.transaction(async (tx) => {
-    // Get session
-    const session = await tx.findById('sessions', sessionId);
-    if (!session) return;
+  const session = await storage.read('sessions', sessionId);
+  if (!session) return;
 
-    // Delete related data
-    const patients = await tx.findByField('patients', 'session_id', session.session_id);
-    await tx.batchDelete('patients', patients.map(p => p.id));
+  // Delete related data
+  await storage.bulkDelete('patients', { session_id: session.session_id });
+  await storage.bulkDelete('audio_recordings', { session_id: session.session_id });
 
-    // Delete session
-    await tx.delete('sessions', sessionId);
-  });
+  // Delete session
+  await storage.delete('sessions', sessionId);
 }
 ```
 
 ### Pattern 3: Aggregate Stats
 ```typescript
 async function getSessionStats(sessionId: string) {
-  const session = await storage.findById('sessions', sessionId);
+  const session = await storage.read('sessions', sessionId);
   const patients = await storage.findByField('patients', 'session_id', session.session_id);
   const recordings = await storage.findByField('audio_recordings', 'session_id', session.session_id);
 
@@ -461,7 +438,7 @@ npm test
 ### Session Not Persisting
 1. Check console for errors
 2. Verify bootstrap completed: "Storage initialized successfully"
-3. Check if session was created: `storage.count('sessions')`
+3. Check if session was created: `storage.findByField('sessions', 'status', 'active')`
 4. Verify platform detection: Check logs for adapter type
 
 ### Data Not Purging
@@ -565,9 +542,3 @@ npm test
 npx expo start -c
 ```
 
----
-
-**Status**: Prototyping Ready
-**Compliance**: 100%
-**Platforms**: Android, iOS, Web
-**Date**: 2026-05-14

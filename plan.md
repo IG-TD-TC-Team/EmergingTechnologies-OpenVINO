@@ -1,63 +1,72 @@
-# Documentation Audit — Backend Markdown
+# Documentation Audit — Frontend Markdown
 
 ## Context
 
-Audit of all backend `.md` files (`README.md`, `TECHNICAL_BACKGROUND.md`, `PROJECT_PRESENTATION.md`, `OPENVINO_PRESENTATION.md`, `BENCHMARK_HOWTO.md`) against the actual codebase state revealed stale references, missing entries, raw developer notes, and empty sections. Tasks below are grouped by file.
+Audit of all frontend `.md` files (`CLAUDE.md` frontend section, `src/__tests__/README.md`, `src/repositories/USAGE.md`, `src/repositories/adapters/STORAGE_FACTORY.md`, `HOW_TO_USE_CAPABILITIES.md`) against the actual codebase state. Issues include phantom files, missing files, stale directory trees, outdated test structure, and broken doc examples.
 
 ---
 
-## README.md
+## Link Audit
+
+| Link | Location | Result |
+|------|----------|--------|
+| `https://www.figma.com/design/xatJv9J3dQWl258H1l4eWM/Sof-IA-HealthCare-assistant` | CLAUDE.md | 403 — auth required. URL format valid, not broken. |
+| `https://dev.azure.com/Sof-IA/Front-End-React/_sprints/taskboard/...` | CLAUDE.md | 302 → Microsoft login. URL format valid, not broken. |
+| `[IRepository Interface](../repositories/interfaces/IRepository.ts)` | `__tests__/README.md` | File exists ✓ |
+| `[StorageFactory](../repositories/adapters/StorageFactory.ts)` | `__tests__/README.md` | File exists ✓ |
+| `[SqliteAdapter](../repositories/adapters/sqlite/SqliteAdapter.ts)` | `__tests__/README.md` | File exists ✓ |
+| `[DexieAdapter](../repositories/adapters/dexie/DexieAdapter.ts)` | `__tests__/README.md` | File exists ✓ |
+
+No dead links. Both external links are auth-gated, not missing.
+
+---
+
+## CLAUDE.md — Frontend Section
 
 | Task | Issue | Status |
 |------|-------|--------|
-| D1 | **API Endpoints table incomplete** — missing 8 endpoints added since the table was written: `POST /api/chat`, `DELETE /api/chat`, `GET /api/chat/history`, `POST /api/transcription/file`, `POST /api/transcription/sample`, `GET /api/catalogue`, `POST /api/catalogue/download`, `POST /api/voice/transcribe-and-structure` | Done |
-| D2 | **Composables list incomplete** — `web/static/composables/` section shows only 5 files; missing `logs.js`, `chat.js`, `catalogue.js`, `transcription.js` | Done |
-| D3 | **`web/` structure missing `sessions.py`** — file exists (`web/sessions.py` — in-memory session store for Chat) but is not listed in the repository tree | Done |
-| D4 | **OpenVINO version wrong** — "Technologies Used" says `OpenVINO 2024.x`; installed packages are `2026.1.0.0` | Done |
-| D5 | **Repository root label wrong** — tree header shows `OpenVino/` but the actual directory is `Sof-IA_Backend/` | Won't fix — intentional |
+| F1 | **BedDetailPresenter.js listed but doesn't exist** — Removed from presenters list. | Done |
+| F2 | **RecordingModeScreen is a phantom** — Removed from navigation flow. | Done |
+| F3 | **SettingsScreen completely undocumented** — Added to screens directory tree and navigation flow. | Done |
+| F4 | **Screen component files missing from directory tree** — Added `AudioSourceBadge.js`, `MicButton.js`, `MicPermissionBanner.js`, `RecordingIndicator.js`. | Done |
+| F5 | **Audio services directory severely incomplete** — Added 7 missing files: `ChunkUploadService.js`, `DeviceMicStrategy.js`, `OfflineQueueDb.js`, `OfflineQueueService.js`, `ServiceWorkerManager.js`, `ShiftCleanupService.js`, `WebRecorderService.js`. | Done |
+| F6 | **Queue service directory incomplete** — Added `DexieQueueRepository.ts`, `IOfflineQueueRepository.ts`, `SQLiteQueueRepository.ts`, `index.ts`. | Done |
+| F7 | **Top-level services missing from tree** — Added `ApiConfigService.js`, `ChunkUploadService.js`, `PermissionsService.js`. | Done |
+| F8 | **Undocumented directories: tasks/ and types/** — Added both directories with their files. | Done |
+| F9 | **hooks/ shows only one file** — Added `useQueueNotificationsImpl.tsx`. | Done |
+| F10 | **PatientRepository.js undocumented** — Added to repositories tree. | Done |
 
 ---
 
-## TECHNICAL_BACKGROUND.md
+## src/__tests__/README.md
 
 | Task | Issue | Status |
 |------|-------|--------|
-| D6 | **"Exploring the Side Quests" section framing is backwards** — the section declares Whisper and Phi-3 are "side quests not part of the core benchmark suite", but they are the core benchmarks. Apertus 8B was the experimental work. The section needs to be restructured to reflect what was actually the main project vs the experiment. | Done |
-| D7 | **Raw developer notes left in document** — lines 239–241 contain unfinalised inline notes (`ADD Apertus openvino coversion --> ...` and `TODO:`) that were never removed or turned into proper content. Apertus OpenVINO export is now complete and benchmarked — these notes are stale and should be rewritten as a brief retrospective on the export challenge. | Done |
+| F11 | **Test structure tree is severely outdated** — Rewrote to reflect all 6 subdirectories and 30+ test files. | Done |
+| F12 | **"Last Updated: 2026-03-30" is stale** — Removed footer block (Last Updated / Version / Maintainer). | Done |
+| F13 | **Coverage table has TBD in every cell** — Removed the "Current" column entirely. | Done |
 
 ---
 
-## PROJECT_PRESENTATION.md
+## src/repositories/USAGE.md
 
 | Task | Issue | Status |
 |------|-------|--------|
-| D8 | **Sections 6, 7, and 8 are empty** — "End-to-End Pipeline Implementation", "Demonstration Results", and "Conclusion" exist as headings with no body content. Either fill them or remove the headings. | Deferred — to discuss with team |
-| D9 | **RTF missing from metrics list** — Section 3 "Metrics collected" lists latency, memory, WER but omits Real-Time Factor (RTF), which appears as a key result metric in Section 4 and throughout BENCHMARK_HOWTO.md. | Done |
+| F14 | **IRepository mock is incomplete** — Added `queryBySessionAndBed` and `findByField` to the mock object. | Done |
 
 ---
 
-## OPENVINO_PRESENTATION.md
+## src/repositories/interfaces/IRepository.ts (code issue)
 
-No functional incoherences found. The document is self-contained theory and references, not coupled to the codebase state.
-
----
-
-## BENCHMARK_HOWTO.md
-
-No issues — updated 2026-05-18 to reflect the full web interface.
+| Task | Issue | Status |
+|------|-------|--------|
+| F15 | **findByField declared twice in IRepository** — Removed the shorter duplicate declaration; kept the fully documented one after `bulkDelete`. | Done |
 
 ---
 
-## Execution Order
+## HOW_TO_USE_CAPABILITIES.md
 
-Suggested order (D1–D5 are quick; D6–D9 require writing):
-
-1. D5 — fix repo root label (one word)
-2. D4 — fix OpenVINO version number
-3. D3 — add `sessions.py` to web/ tree
-4. D2 — add 4 missing composables to web/static/composables/ tree
-5. D1 — add 8 missing API endpoints to table
-6. D9 — add RTF to metrics list in PROJECT_PRESENTATION.md §3
-7. D7 — remove/rewrite raw TODO notes in TECHNICAL_BACKGROUND.md
-8. D6 — restructure "Side Quests" section framing
-9. D8 — fill or remove empty sections 6/7/8 in PROJECT_PRESENTATION.md
+| Task | Issue | Status |
+|------|-------|--------|
+| F16 | **Capability table omits iOS** — Merged Android/iOS into one column for boolean flags; added iOS column to string-value table. | Done |
+| F17 | **window.__capabilities console check doesn't work** — Replaced with a correct import-based debug pattern. | Done |

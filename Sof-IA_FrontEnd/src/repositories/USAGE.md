@@ -396,6 +396,8 @@ const mockRepo: IRepository = {
   update: jest.fn(),
   delete: jest.fn(),
   queryBySession: jest.fn(),
+  queryBySessionAndBed: jest.fn(),
+  findByField: jest.fn(),
   bulkDelete: jest.fn(),
   purgeExpired: jest.fn(),
 };

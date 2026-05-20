@@ -242,8 +242,8 @@ function StatusBar() {
 
 ### Boolean Flags
 
-| Flag | Android | Web | Usage |
-|------|---------|-----|-------|
+| Flag | Android / iOS | Web | Usage |
+|------|--------------|-----|-------|
 | `hasBluetooth` | ✅ true | ❌ false | Show Bluetooth UI |
 | `hasFileSystem` | ✅ true | ❌ false | Show file operations |
 | `hasBackgroundTasks` | ✅ true | ❌ false | Enable background sync |
@@ -252,11 +252,11 @@ function StatusBar() {
 
 ### String Values
 
-| Flag | Android | Web | Usage |
-|------|---------|-----|-------|
-| `audioRecorder` | `'expo-av'` | `'MediaRecorder'` | Choose audio API |
-| `storage` | `'sqlite'` | `'dexie'` | Choose database |
-| `platform` | `'android'` | `'web'` | Display platform name |
+| Flag | Android | iOS | Web | Usage |
+|------|---------|-----|-----|-------|
+| `audioRecorder` | `'expo-av'` | `'expo-av'` | `'MediaRecorder'` | Choose audio API |
+| `storage` | `'sqlite'` | `'sqlite'` | `'dexie'` | Choose database |
+| `platform` | `'android'` | `'ios'` | `'web'` | Display platform name |
 
 ---
 
@@ -380,17 +380,18 @@ npm run web
 
 ### Quick Console Check
 
-Open DevTools and paste:
+In the Metro bundler or browser DevTools console, import and log capabilities directly:
 
 ```javascript
-// Check capabilities
-console.log(window.__capabilities);
+// In a component or service file — add temporarily for debugging
+import { capabilities } from '../config/capabilities';
+console.log('Capabilities:', capabilities);
 
-// On Android should show:
-// { hasBluetooth: true, hasFileSystem: true, ... }
+// On Android/iOS should show:
+// { hasBluetooth: true, hasFileSystem: true, isNative: true, isWeb: false, ... }
 
 // On Web should show:
-// { hasBluetooth: false, hasFileSystem: false, ... }
+// { hasBluetooth: false, hasFileSystem: false, isNative: false, isWeb: true, ... }
 ```
 
 ---

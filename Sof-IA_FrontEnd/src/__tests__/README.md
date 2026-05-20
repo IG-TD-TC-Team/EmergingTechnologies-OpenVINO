@@ -8,13 +8,46 @@ Comprehensive test suite for the unified storage interface, ensuring both SQLite
 src/__tests__/
 ├── README.md                          # This file
 ├── helpers/
-│   └── test-helpers.ts               # Test utilities and factory functions
-└── integration/
-    ├── shared/
-    │   └── storage.integration.suite.ts  # Shared test suite (runs on both adapters)
-    ├── dexie.integration.test.ts         # Dexie adapter tests
-    ├── sqlite.integration.test.ts        # SQLite adapter tests
-    └── storage-factory.integration.test.ts # Factory tests
+│   ├── test-helpers.ts               # Test utilities and factory functions
+│   └── transcription-fixture.ts      # Transcription test data fixtures
+├── integration/
+│   ├── shared/
+│   │   ├── storage.integration.suite.ts        # Shared test suite (runs on both adapters)
+│   │   └── storage.integration.suite.simple.ts # Simplified variant
+│   ├── bedcard-navigation.test.js              # Bed card navigation flow
+│   ├── card-tables.integration.test.ts         # Card-type table integration
+│   ├── cross-platform.integration.test.ts      # Cross-platform consistency
+│   ├── dexie.integration.test.ts               # Dexie adapter tests
+│   ├── offline-queue.integration.test.js       # Offline queue end-to-end
+│   ├── sqlite.integration.test.ts              # SQLite adapter tests
+│   ├── storage-factory.integration.test.ts     # Factory tests
+│   └── web-platform.integration.test.ts        # Web platform specifics
+├── networkMonitor/
+│   └── NetworkMonitor.test.ts
+├── offlineQueue/
+│   ├── OfflineQueueManager.test.ts
+│   ├── recordingPipeline.integration.test.ts
+│   └── shiftEndGate.integration.test.ts
+├── presenters/
+│   ├── CardDetailPresenter.test.js
+│   ├── DashboardPresenter.endshift.test.js
+│   ├── DashboardPresenter.us21.test.js
+│   ├── DashboardPresenter.us23.test.js
+│   ├── EditPatientPresenter.test.js
+│   ├── LoadingPresenter.us23.test.js
+│   └── PatientDetailsPresenter.test.js
+├── screens/
+│   ├── BedDetailScreen.test.js
+│   ├── CardDetailScreen.test.js
+│   ├── DashboardScreen.scroll.test.js
+│   └── SettingsScreen.test.js
+└── services/
+    ├── ChunkUploadService.test.js
+    ├── EndShiftService.test.ts
+    ├── PermissionsService.web.test.js
+    ├── ServiceWorkerManager.test.js
+    ├── TranscriptionService.test.js
+    └── WebRecorderService.test.js
 ```
 
 ## 🎯 Test Coverage
@@ -240,12 +273,12 @@ This prevents test pollution and ensures reliable results.
 
 ## 📊 Coverage Goals
 
-| Metric     | Target | Current |
-|------------|--------|---------|
-| Branches   | 70%    | TBD     |
-| Functions  | 70%    | TBD     |
-| Lines      | 70%    | TBD     |
-| Statements | 70%    | TBD     |
+| Metric     | Target |
+|------------|--------|
+| Branches   | 70%    |
+| Functions  | 70%    |
+| Lines      | 70%    |
+| Statements | 70%    |
 
 ## 🐛 Debugging Tests
 
@@ -306,8 +339,3 @@ If tests fail:
 4. Check mock configurations in `jest.setup.js`
 5. Run tests in isolation to identify issues
 
----
-
-**Last Updated**: 2026-03-30
-**Version**: 1.0.0
-**Maintainer**: Development Team

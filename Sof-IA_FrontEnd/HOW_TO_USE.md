@@ -1,6 +1,6 @@
 # Unified Storage Interface - How to Use
 
-> **API reference:** For the complete `IRepository` interface, see [`src/repositories/USAGE.md`](./src/repositories/USAGE.md). This guide covers setup, common patterns, and troubleshooting.
+> **API reference:** For the complete `IRepository` interface, see the **Repository Layer** section of [`HOW_TO_USE_CAPABILITIES.md`](./HOW_TO_USE_CAPABILITIES.md). This guide covers setup, common patterns, and troubleshooting.
 
 Complete guide for using the unified storage system in your React Native/Web app with automatic data cleanup and cross-platform support.
 
@@ -51,7 +51,7 @@ const storage = await getStorage();
 
 // CREATE
 const session = await storage.create('sessions', {
-  nurse_name: 'Dr. Martinez',
+  nurse_name: 'R.N. Martinez',
   started_at: new Date().toISOString(),
   status: 'active',
   device_id: 'device_123',
@@ -257,7 +257,7 @@ console.log('Error count:', health.errorCount);
 
 **View Data in Browser:**
 1. Open Chrome DevTools (F12)
-2. Application tab → IndexedDB → `sofia`
+2. Application tab → IndexedDB → `sofia_db`
 3. Click `sessions` to view records
 
 **Features:**
@@ -276,8 +276,7 @@ console.log('Error count:', health.errorCount);
 - Automatic migrations
 
 **Location:**
-- Android: `{app-directory}/databases/sofia.db`
-- iOS: `{app-directory}/Library/LocalDatabase/sofia.db`
+- Stored by `expo-sqlite` under the app's document directory in an `SQLite/` subfolder (database file `sofia.db`). The exact absolute path varies by OS and is managed by Expo.
 
 ---
 
@@ -330,7 +329,7 @@ npm run test:coverage
 
 ### Test 3: Verify Data
 **On Web:**
-1. F12 → Application → IndexedDB → sofia → sessions
+1. F12 → Application → IndexedDB → sofia_db → sessions
 2. You should see your session record
 
 **On Mobile:**
@@ -498,18 +497,17 @@ npm test
 ### Common Fields (All Tables)
 - `id` - UUID (auto-generated)
 - `created_at` - ISO 8601 timestamp
-- `expires_at` - ISO 8601 timestamp (30 days from creation)
+- `expires_at` - ISO 8601 timestamp (TTL is per-entity — see the retention table above, not a fixed 30 days)
 - `session_id` - Foreign key to sessions
 
 ---
 
 ## Performance Tips
 
-1. **Use batch operations** for multiple creates/deletes
-2. **Cache frequently accessed data** (e.g., active session)
-3. **Use transactions** for multi-step operations
-4. **Leverage indexes** for common queries (already configured)
-5. **Use pagination** for large result sets
+1. **Use `bulkDelete`** to remove many records in one call (e.g. session cleanup)
+2. **Cache frequently accessed data** (e.g., active session — see `SessionService`)
+3. **Leverage indexes** for common queries (`session_id`, `status`, `expires_at` — already configured)
+4. **Run `create` calls in parallel** with `Promise.all(...)` when inserting many records
 
 ---
 

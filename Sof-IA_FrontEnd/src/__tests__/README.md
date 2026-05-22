@@ -2,7 +2,7 @@
 
 Comprehensive test suite for the unified storage interface, ensuring both SQLite (Android/iOS) and Dexie (Web) adapters work identically with business logic.
 
-## 📁 Test Structure
+## Test Structure
 
 ```
 src/__tests__/
@@ -36,11 +36,6 @@ src/__tests__/
 │   ├── EditPatientPresenter.test.js
 │   ├── LoadingPresenter.us23.test.js
 │   └── PatientDetailsPresenter.test.js
-├── screens/
-│   ├── BedDetailScreen.test.js
-│   ├── CardDetailScreen.test.js
-│   ├── DashboardScreen.scroll.test.js
-│   └── SettingsScreen.test.js
 └── services/
     ├── ChunkUploadService.test.js
     ├── EndShiftService.test.ts
@@ -50,46 +45,45 @@ src/__tests__/
     └── WebRecorderService.test.js
 ```
 
-## 🎯 Test Coverage
+## Test Coverage
 
 The shared integration test suite verifies:
 
-### ✅ Initialization & Health
+### Initialization & Health
 - Storage initialization
 - Health checks
 - Table creation
 
-### ✅ CRUD Operations
+### CRUD Operations
 - **Sessions**: Create, Read, Update, Delete
 - **Patients**: Full CRUD with session relationships
 - **AudioRecordings**: CRUD with patient relationships
 - **Transcriptions**: CRUD with audio relationships
 - **ClinicalNotes**: CRUD with patient relationships
 
-### ✅ Query Operations
-- Count records
-- Check existence
-- Pagination (limit/offset)
-- Find by field
+### Query Operations
+- Find by field (`findByField`)
+- Query all records for a session (`queryBySession`)
+- Query card records by session + bed (`queryBySessionAndBed`)
+- Bulk delete by where-clause (`bulkDelete`)
 
-### ✅ Data Expiration
+### Data Expiration
 - `purgeExpired()` removes expired records
 - Purges from all tables (sessions, patients, audio_recordings, transcriptions, clinical_notes)
 - Preserves non-expired records
 - Returns correct purge count
 
-### ✅ Advanced Features
-- Transaction support
-- Batch operations (create/delete)
+### Advanced Features
+- Bulk delete with comparison operators (`<`, `in`, etc.)
 - Error handling
 - Data integrity (types, nulls, timestamps)
 
-### ✅ Platform-Specific
+### Platform-Specific
 - IndexedDB usage (Dexie)
 - SQLite with WAL mode
 - Factory platform detection
 
-## 🚀 Running Tests
+## Running Tests
 
 ### Run All Tests
 ```bash
@@ -123,7 +117,7 @@ npm run test:watch
 npm run test:coverage
 ```
 
-## 📝 Writing New Tests
+## Writing New Tests
 
 ### Using the Shared Test Suite
 
@@ -168,7 +162,7 @@ const customPatient = createTestPatient({
 });
 ```
 
-## 🧪 Test Patterns
+## Test Patterns
 
 ### Testing CRUD Operations
 
@@ -181,7 +175,7 @@ it('should create and retrieve a patient', async () => {
   expect(created.id).toBe(patient.id);
 
   // Read
-  const found = await storage.findById('patients', patient.id);
+  const found = await storage.read('patients', patient.id);
   expect(found).toMatchObject({
     nombre: patient.nombre,
     apellido: patient.apellido,
@@ -202,7 +196,7 @@ it('should purge expired records', async () => {
   expect(purgedCount).toBeGreaterThanOrEqual(1);
 
   // Verify removed
-  const found = await storage.findById('sessions', expired.id);
+  const found = await storage.read('sessions', expired.id);
   expect(found).toBeNull();
 });
 ```
@@ -225,7 +219,7 @@ it('should find patients by session_id', async () => {
 });
 ```
 
-## 🏗️ Architecture
+## Architecture
 
 ### Shared Test Suite Pattern
 
@@ -255,7 +249,7 @@ Each test:
 
 This prevents test pollution and ensures reliable results.
 
-## 🔧 Configuration
+## Configuration
 
 ### Jest Configuration (`jest.config.js`)
 - **Preset**: `jest-expo` for React Native
@@ -271,7 +265,7 @@ This prevents test pollution and ensures reliable results.
 - Mocks expo-sqlite for SQLite tests
 - Suppresses console logs during tests
 
-## 📊 Coverage Goals
+## Coverage Goals
 
 | Metric     | Target |
 |------------|--------|
@@ -280,7 +274,7 @@ This prevents test pollution and ensures reliable results.
 | Lines      | 70%    |
 | Statements | 70%    |
 
-## 🐛 Debugging Tests
+## Debugging Tests
 
 ### Run a Single Test File
 ```bash
@@ -304,7 +298,7 @@ node --inspect-brk node_modules/.bin/jest --runInBand
 
 Then open `chrome://inspect` in Chrome.
 
-## 📚 Best Practices
+## Best Practices
 
 1. **Always use test helpers** - Don't manually create test data
 2. **Test both success and failure cases** - Error handling is critical
@@ -314,14 +308,14 @@ Then open `chrome://inspect` in Chrome.
 6. **Mock external dependencies** - AsyncStorage, expo-sqlite, etc.
 7. **Assert meaningful behavior** - Not just "it doesn't throw"
 
-## 🔗 Related Documentation
+## Related Documentation
 
 - [IRepository Interface](../repositories/interfaces/IRepository.ts) - Storage contract
 - [StorageFactory](../repositories/adapters/StorageFactory.ts) - Factory implementation
 - [SqliteAdapter](../repositories/adapters/sqlite/SqliteAdapter.ts) - SQLite implementation
 - [DexieAdapter](../repositories/adapters/dexie/DexieAdapter.ts) - Dexie implementation
 
-## 🤝 Contributing
+## Contributing
 
 When adding new features to the storage layer:
 
@@ -330,7 +324,7 @@ When adding new features to the storage layer:
 3. **Update this README** - Document new test patterns
 4. **Check coverage** - Maintain 70% threshold
 
-## 📞 Support
+## Support
 
 If tests fail:
 1. Check if it's adapter-specific or shared behavior
@@ -338,4 +332,3 @@ If tests fail:
 3. Verify test data factories are correct
 4. Check mock configurations in `jest.setup.js`
 5. Run tests in isolation to identify issues
-

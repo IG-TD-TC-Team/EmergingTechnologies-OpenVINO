@@ -290,7 +290,7 @@ npx expo install expo-av
 
 ### What is Sof-IA?
 
-An **ambient scribe app for nurses**. Nurses use a **USB-C microphone** (e.g. Rhode Mini Wireless) or their **device built-in mic** to continuously capture bedside conversations. Audio is transcribed (Whisper API) and AI-extracted into structured clinical data (medications, vitals, allergies) — all without manual note-taking. Data lives locally on the device and is wiped at shift end.
+An **ambient scribe app for nurses**. Nurses use a **USB-C microphone** (e.g. Rode Wireless Mini) or their **device built-in mic** to continuously capture bedside conversations. Audio is transcribed (Whisper API) and AI-extracted into structured clinical data (medications, vitals, allergies) — all without manual note-taking. Data lives locally on the device and is wiped at shift end.
 
 Runs on **Android** (primary) and **Chrome/Web** (fallback).
 

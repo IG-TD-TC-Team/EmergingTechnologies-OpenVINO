@@ -15,7 +15,7 @@
 
 Read the documents in this order:
 
-### 1. [OPENVINO_PRESENTATION.md](./OPENVINO_PRESENTATION.md)
+### 1. [OPENVINO_PRESENTATION.md](OPENVINO_PRESENTATION.md)
 **What is OpenVINO and how does it work?**
 
 Start here if you want to understand the technology.
@@ -28,7 +28,7 @@ Start here if you want to understand the technology.
 
 ---
 
-### 2. [PROJECT_PRESENTATION.md](./PROJECT_PRESENTATION.md)
+### 2. [PROJECT_PRESENTATION.md](PROJECT_PRESENTATION.md)
 **The healthcare AI challenge and our solution**
 
 - The clinical use case: why Swiss hospitals can't use cloud AI
@@ -39,7 +39,7 @@ Start here if you want to understand the technology.
 
 ---
 
-### 3. [BENCHMARK_HOWTO.md](./BENCHMARK_HOWTO.md)
+### 3. [BENCHMARK_HOWTO.md](BENCHMARK_HOWTO.md)
 **Step-by-step guide to running the benchmarks yourself**
 
 - Python environment setup
@@ -50,7 +50,7 @@ Start here if you want to understand the technology.
 
 ---
 
-### 4. [TECHNICAL_BACKGROUND.md](./TECHNICAL_BACKGROUND.md)
+### 4. [TECHNICAL_BACKGROUND.md](TECHNICAL_BACKGROUND.md)
 **Theoretical foundation**
 
 Background reading if you want to understand why things work the way they do.

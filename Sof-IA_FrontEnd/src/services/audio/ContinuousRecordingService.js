@@ -19,8 +19,13 @@ import { getStorage } from '../../repositories';
 import AudioSourceResolver from './AudioSourceResolver';
 import ExpoAvRecordingStrategy from './ExpoAvRecordingStrategy';
 import WebMediaRecordingStrategy from './WebMediaRecordingStrategy';
+import TranscriptionService from '../TranscriptionService';
+import SessionService from '../SessionService';
 import ChunkUploadService from './ChunkUploadService';
 import OfflineQueueService from './OfflineQueueService';
+import OfflineQueueManager from '../queue/OfflineQueueManager';
+import NetworkMonitor from '../network/NetworkMonitor';
+import { registerBackgroundQueueSync } from '../../tasks/backgroundQueueSync';
 import StorageKeys from '../../constants/storageKeys';
 
 const CHUNK_DURATION_MS = 30_000;
@@ -65,19 +70,85 @@ const ContinuousRecordingService = {
       if (raw) {
         const saved = JSON.parse(raw);
         if (saved.isRecording && saved.sessionId) {
-          console.log('[ContinuousRecording] Restoring recording state for session:', saved.sessionId);
-          // Emit immediately for <200ms UI restore
-          this._isRecording = true;
-          this._sessionId = saved.sessionId;
-          this._patientId = saved.patientId ?? null;
-          this._chunkIndex = saved.chunkIndex ?? 0;
-          this._emit(true, 'online');
-          // Resume the chunk loop
-          await this._startChunkLoop();
+          // Only restore if this is still the active session.
+          // Guards against restarting the mic loop when the user has already
+          // started a new shift (stale AsyncStorage from the previous one).
+          const activeSessionId = await SessionService.getActiveSessionId();
+          if (activeSessionId !== saved.sessionId) {
+            await this._clearPersistedState();
+            console.log('[ContinuousRecording] Stale restore state cleared — session changed');
+          } else {
+            console.log('[ContinuousRecording] Restoring recording state for session:', saved.sessionId);
+            // Emit immediately for <200ms UI restore
+            this._isRecording = true;
+            this._sessionId = saved.sessionId;
+            this._patientId = saved.patientId ?? null;
+            this._chunkIndex = saved.chunkIndex ?? 0;
+            this._strategy = capabilities.isWeb
+              ? WebMediaRecordingStrategy
+              : ExpoAvRecordingStrategy;
+            const deviceId = capabilities.isWeb ? await this._resolveWebDeviceId() : null;
+            await this._strategy.prepare(saved.sessionId, deviceId);
+            this._emit(true, 'online');
+            // Resume the chunk loop
+            await this._startChunkLoop();
+          }
         }
       }
 
-      // Start network listener for offline queue
+      // Wire the upload function for OfflineQueueManager.retryPending().
+      // Uses the same ChunkUploadService path as live recording so retry
+      // behaviour is identical to first-attempt behaviour.
+      OfflineQueueManager.configure({
+        uploadFn: async (chunkRef, sessionId) => {
+          try {
+            const storage = await getStorage();
+            const recording = await storage.read('audio_recordings', chunkRef);
+            if (!recording) {
+              // Data expired or purged — nothing to upload. Silently succeed to
+              // remove the stale entry from the queue without firing a toast.
+              console.warn('[ContinuousRecording] uploadFn: recording not found, cleaning up stale queue entry:', chunkRef);
+              return { success: true };
+            }
+
+            // Verify the blob still exists before attempting the API call.
+            if (recording.file_path && recording.file_path.startsWith('indexeddb://audio-blobs/')) {
+              const blobId = recording.file_path.replace('indexeddb://audio-blobs/', '');
+              const blobRecord = await storage.read('audio_blobs', blobId);
+              if (!blobRecord) {
+                console.warn('[ContinuousRecording] uploadFn: blob expired, cleaning up stale queue entry:', blobId);
+                return { success: true };
+              }
+            }
+
+            return TranscriptionService.processChunk({
+              recordingId: recording.id,
+              filePath: recording.file_path,
+              sessionId,
+              mimeType: recording.format_mime_type,
+              patientId: recording.patient_id ?? null,
+              timestampStart: recording.started_at
+                ? new Date(recording.started_at).getTime()
+                : Date.now(),
+              _skipQueue: true,
+            });
+          } catch (err) {
+            console.warn('[ContinuousRecording] uploadFn error:', err?.message);
+            return { success: false, error: err?.message ?? 'Upload failed' };
+          }
+        },
+      });
+
+      // Start NetworkMonitor — drives retryPending() on reconnect and
+      // exposes useNetworkStatus() to components.
+      await NetworkMonitor.start();
+
+      // Register background task so the OS can drain the queue while the app
+      // is backgrounded (Android only; no-op on web or without the package).
+      await registerBackgroundQueueSync();
+
+      // Legacy connectivity broadcast (keeps DashboardPresenter's connectionStatus
+      // state in sync until it migrates to useNetworkStatus()).
       const unsubOffline = OfflineQueueService.subscribe((status) => {
         this._emit(this._isRecording, status);
       });
@@ -259,13 +330,14 @@ const ContinuousRecordingService = {
       expires_at: new Date(Date.now() + 14 * 60 * 60 * 1000).toISOString(),
     });
 
-    // Upload immediately — TranscriptionService queues to OfflineQueueService on failure
-    await ChunkUploadService.upload({
+    // Upload immediately — queued to OfflineQueueManager on failure
+    await TranscriptionService.processChunk({
       recordingId: recording.id,
       filePath: uri,
       sessionId: this._sessionId,
       mimeType,
       patientId: this._patientId,
+      timestampStart: new Date(recording.started_at).getTime(),
     });
   },
 

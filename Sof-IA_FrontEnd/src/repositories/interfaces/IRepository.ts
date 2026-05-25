@@ -111,9 +111,22 @@ export interface IRepository {
   queryBySession<T>(store: string, sessionId: string): Promise<T[]>;
 
   /**
-   * Find all records where a given field equals a value.
+   * Query all records for a specific session AND bed (patient).
+   * Used by card-type stores (medications, vital_signs, allergies, safety_info)
+   * where each record is scoped to both a shift and a bed.
+   *
+   * @template T - The entity type
+   * @param store    - Card store name: "medications" | "vital_signs" | "allergies" | "safety_info"
+   * @param sessionId - Session/shift identifier
+   * @param bedId     - Bed identifier (maps to bed_id on every card record)
+   * @returns Records sorted by created_at descending
+   *
+   * @example
+   * const meds = await repo.queryBySessionAndBed<MedicationRecord>(
+   *   'medications', 'session_20260419_080000', 'bed-3'
+   * );
    */
-  findByField<T>(store: string, field: string, value: any): Promise<T[]>;
+  queryBySessionAndBed<T>(store: string, sessionId: string, bedId: string): Promise<T[]>;
 
   /**
    * Delete multiple records matching a where clause.

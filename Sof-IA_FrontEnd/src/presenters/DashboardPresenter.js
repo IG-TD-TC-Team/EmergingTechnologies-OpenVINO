@@ -14,6 +14,7 @@
  */
 
 import { AppState, Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import AudioSourceResolver from '../services/audio/AudioSourceResolver';
 import WebRecorderService from '../services/audio/WebRecorderService';
 import ServiceWorkerManager from '../services/audio/ServiceWorkerManager';
@@ -22,6 +23,7 @@ import SessionService from '../services/SessionService';
 
 import ContinuousRecordingService from '../services/audio/ContinuousRecordingService';
 import EndShiftService from '../services/EndShiftService';
+import OfflineQueueManager from '../services/queue/OfflineQueueManager';
 import { getStorage } from '../repositories';
 
 export default class DashboardPresenter {
@@ -34,6 +36,7 @@ export default class DashboardPresenter {
 
         this._pendingNavigation = null;
         this._activePatient = null;
+        this._isRecording = false;
     }
 
     // ─── Lifecycle ────────────────────────────────────────────────────────────
@@ -131,9 +134,10 @@ export default class DashboardPresenter {
             return;
         }
 
-        // Ensure an active patient exists before recording starts so bed_id is always set.
-        // Auto-create only when starting (not stopping) and no bed is selected.
-        if (!this._activePatient && !ContinuousRecordingService.isRecording()) {
+        const starting = !this._isRecording;
+
+        // Auto-create patient when starting without one selected
+        if (starting && !this._activePatient) {
             const patient = await this._autoCreatePatient();
             if (patient) {
                 this._activePatient = { id: patient.id, name: patient.name, bed: patient.bed };
@@ -142,12 +146,25 @@ export default class DashboardPresenter {
             }
         }
 
+        this._isRecording = starting;
+        this._view.setRecording(starting);
+        await AsyncStorage.setItem('was_recording', starting ? 'true' : 'false');
+
         try {
             await ContinuousRecordingService.toggleRecording(sessionId, this._activePatient?.id ?? null);
         } catch (err) {
             console.error('[DashboardPresenter] Failed to toggle recording:', err);
-            return;
         }
+    }
+
+    async _maybeResumeRecording() {
+        const wasRecording = await AsyncStorage.getItem('was_recording');
+        if (wasRecording !== 'true') return;
+        const permission = await PermissionsService.check();
+        if (permission !== 'granted') return;
+        this._isRecording = true;
+        this._view.setRecording(true);
+        await AsyncStorage.setItem('was_recording', 'true');
     }
 
     async _autoCreatePatient() {
@@ -273,10 +290,10 @@ export default class DashboardPresenter {
             const segments = sessionId
                 ? await storage.queryBySession('transcription_segments', sessionId)
                 : [];
-            navigation.navigate('BedDetails', { patient, segments, sessionId });
+            navigation?.navigate('BedDetails', { patient, segments, sessionId });
         } catch (e) {
             console.error('[DashboardPresenter] onBedPress nav error:', e);
-            navigation.navigate('BedDetails', { patient, segments: [], sessionId: null });
+            navigation?.navigate('BedDetails', { patient, segments: [], sessionId: null });
         }
     }
 
@@ -315,16 +332,17 @@ export default class DashboardPresenter {
         this._view.setConfirmVisible(false);
         this._view.setFlushSyncing(true);
 
-        const flushed = await this._attemptQueueFlush();
+        const { flushed, unsyncedCount } = await this._attemptQueueFlush();
 
         this._view.setFlushSyncing(false);
 
         if (flushed) {
-            // Queue clear — proceed straight to cleanup (T5)
+            // Queue clear — proceed straight to cleanup
             await this._proceedWithCleanup(navigation);
         } else {
-            // Still offline — let nurse decide
+            // Chunks remain — let the nurse decide whether to wait or force-delete
             this._pendingNavigation = navigation;
+            this._view.setUnsyncedCount(unsyncedCount);
             this._view.setOfflineGateVisible(true);
         }
     }
@@ -341,10 +359,28 @@ export default class DashboardPresenter {
 
     async _attemptQueueFlush() {
         const sessionId = await SessionService.getActiveSessionId();
-        if (!sessionId) return true;
+        if (!sessionId) return { flushed: true, unsyncedCount: 0 };
 
-        const { success } = await EndShiftService.flushQueue(sessionId);
-        return success;
+        // Attempt to drain the queue — retryPending() is a no-op when already draining.
+        try {
+            await OfflineQueueManager.retryPending();
+        } catch (err) {
+            console.warn('[DashboardPresenter] retryPending error during end-shift flush:', err);
+        }
+
+        // Check what's still in the queue for THIS session only.
+        // getSessionStats filters by session_id so entries from previous shifts
+        // (including ones re-enqueued by a concurrent retryPending loop) never
+        // block a clean shift end.
+        try {
+            const stats = await OfflineQueueManager.getSessionStats(sessionId);
+            const unsyncedCount = stats.pendingCount + stats.failedCount;
+            return { flushed: unsyncedCount === 0, unsyncedCount };
+        } catch (err) {
+            console.warn('[DashboardPresenter] getSessionStats error during end-shift flush:', err);
+            // If we cannot read stats, assume nothing is pending and let cleanup proceed.
+            return { flushed: true, unsyncedCount: 0 };
+        }
     }
 
     async _proceedWithCleanup(navigation) {
@@ -352,8 +388,26 @@ export default class DashboardPresenter {
 
         const sessionId = await SessionService.getActiveSessionId();
 
+        // Clear offline queue entries for this session before the DB wipe.
+        // This prevents stale 'failed' entries from re-triggering the offline
+        // gate when the nurse ends the next shift.
+        if (sessionId) {
+            try {
+                await OfflineQueueManager.clearSession(sessionId);
+            } catch (err) {
+                console.warn('[DashboardPresenter] clearSession error (non-fatal):', err);
+            }
+        }
+
         this._view.setCleanupProgress(true);
         const result = await EndShiftService.run(sessionId ?? '');
+
+        // Second clear: catches any entries re-enqueued by a concurrent retryPending
+        // loop that finished uploading (and failed) while EndShiftService was running.
+        if (sessionId) {
+            try { await OfflineQueueManager.clearSession(sessionId); } catch (_) {}
+        }
+
         this._view.setCleanupProgress(false);
 
         this._view.setCleanupResult({
@@ -364,6 +418,9 @@ export default class DashboardPresenter {
     }
 
     onSuccessDismiss(navigation) {
+        this._isRecording = false;
+        AsyncStorage.setItem('was_recording', 'false');
+
         this._view.setCleanupResult(null);
 
         // Stop any in-progress recording before leaving
@@ -371,7 +428,7 @@ export default class DashboardPresenter {
             const sid = ContinuousRecordingService.getSessionId();
             ContinuousRecordingService.toggleRecording(sid).catch(() => {});
         }
-// Clear active patient — shift is over
+
         if (this._activePatient) {
             this._activePatient = null;
             this._view.setActivePatient(null);

@@ -27,6 +27,11 @@ interface SofiaDatabase extends Dexie {
   recording_queue: Table<any>;
   audio_blobs: Table<any>;
   transcription_segments: Table<any>;
+  // Card stores (US22)
+  medications: Table<any>;
+  vital_signs: Table<any>;
+  allergies: Table<any>;
+  safety_info: Table<any>;
 }
 
 export class DexieAdapter implements IRepository {
@@ -79,6 +84,15 @@ export class DexieAdapter implements IRepository {
     this.db.version(4).stores({
       transcription_segments: 'id, session_id, audio_recording_id, bed_id, expires_at',
     });
+
+    // Version 5: dedicated card stores (US22)
+    // Compound index [session_id+bed_id] enables queryBySessionAndBed() in O(log n).
+    this.db.version(5).stores({
+      medications:  'id, session_id, bed_id, expires_at, [session_id+bed_id]',
+      vital_signs:  'id, session_id, bed_id, expires_at, [session_id+bed_id]',
+      allergies:    'id, session_id, bed_id, expires_at, [session_id+bed_id]',
+      safety_info:  'id, session_id, bed_id, expires_at, [session_id+bed_id]',
+    });
   }
 
   /**
@@ -116,6 +130,11 @@ export class DexieAdapter implements IRepository {
       recording_queue: this.db.recording_queue,
       audio_blobs: this.db.audio_blobs,
       transcription_segments: this.db.transcription_segments,
+      // Card stores (US22)
+      medications: this.db.medications,
+      vital_signs: this.db.vital_signs,
+      allergies: this.db.allergies,
+      safety_info: this.db.safety_info,
     };
 
     const table = tableMap[store];
@@ -219,6 +238,20 @@ export class DexieAdapter implements IRepository {
     return results as T[];
   }
 
+  async queryBySessionAndBed<T>(store: string, sessionId: string, bedId: string): Promise<T[]> {
+    await this.ensureInitialized();
+
+    const table = this.getTable(store);
+    // Uses the compound index [session_id+bed_id] defined in version 5 schema.
+    const results = await table
+      .where('[session_id+bed_id]')
+      .equals([sessionId, bedId])
+      .reverse()
+      .sortBy('created_at');
+
+    return results as T[];
+  }
+
   async findByField<T>(store: string, field: string, value: any): Promise<T[]> {
     await this.ensureInitialized();
 
@@ -314,6 +347,11 @@ export class DexieAdapter implements IRepository {
       'recording_queue',
       'audio_blobs',
       'transcription_segments',
+      // Card stores (US22)
+      'medications',
+      'vital_signs',
+      'allergies',
+      'safety_info',
     ];
 
     for (const storeName of stores) {

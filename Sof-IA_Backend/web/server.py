@@ -5,9 +5,30 @@ Start with:
     uvicorn web.server:app --reload --port 8000
 """
 
+import builtins as _builtins
+import sys as _sys
+
+# Windows default text encoding is cp1252/latin-1; HuggingFace model files use
+# UTF-8 (tokenizer configs often contain characters like em-dash —).
+# Override open() to default to UTF-8 for all text-mode I/O so that optimum /
+# transformers save_pretrained() calls don't crash on non-ASCII content.
+if _sys.platform == 'win32':
+    _real_open = _builtins.open
+
+    def _open_utf8(file, mode='r', buffering=-1, encoding=None, errors=None,
+                   newline=None, closefd=True, opener=None):
+        if 'b' not in str(mode) and encoding is None:
+            encoding = 'utf-8'
+        return _real_open(file, mode, buffering, encoding=encoding,
+                          errors=errors, newline=newline,
+                          closefd=closefd, opener=opener)
+
+    _builtins.open = _open_utf8
+
 import asyncio
 import json
 import logging
+import tempfile
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -21,11 +42,15 @@ from pydantic import BaseModel as PydanticModel
 
 import web.jobs as jobs
 import web.sessions as sessions
-from src.benchmark.channels import QueueProgressChannel
+from src.benchmark.channels import NullProgressChannel, QueueProgressChannel
 from src.benchmark.factory import ModelFactory
 from src.benchmark.repository import ResultRepository
 from src.benchmark.runner import run_benchmark_async, run_live_slm_async, run_live_asr_async
 from src.logging_config import setup_logging
+from src.model_manager.catalogue import CATALOGUE, CATALOGUE_BY_ID
+from src.model_manager.disk import get_model_status, get_pytorch_status
+from src.model_manager.downloader import download_and_convert, download_pytorch
+from src.model_manager.registry import add_model_to_yaml, add_pytorch_to_yaml
 from src.pipeline.transcribe_and_structure import run_transcribe_and_structure
 from web.middleware import RequestLoggingMiddleware, audit_event, hash_prompt
 
@@ -61,6 +86,12 @@ async def lifespan(app: FastAPI):
     slm.load()
     app.state.voice_asr = asr
     app.state.voice_slm = slm
+
+    # ASR model cache for the transcription tab — models stay loaded between requests.
+    # Seed the cache with the already-loaded voice ASR so the first transcription
+    # request against that model_id pays zero load cost.
+    asr_model_id = vp.get("asr_model", "whisper_openvino")
+    app.state.asr_cache = {asr_model_id: asr}
 
     prompt_rel = vp.get("extraction_prompt_file", "data/prompts/structured_extraction_prompt.txt")
     prompt_path = _CONFIG_PATH.parents[1] / prompt_rel
@@ -109,6 +140,11 @@ class LiveASRRequest(PydanticModel):
     save: bool = True
 
 
+class TranscriptionSampleRequest(PydanticModel):
+    model_id: str
+    audio_path: str
+
+
 class ChatRequest(PydanticModel):
     model_id: str
     message: str
@@ -129,9 +165,12 @@ def serve_index():
 # ---------------------------------------------------------------------------
 
 @app.get("/api/models")
-def list_models(request: Request):
-    """Return all models from config with their type, label, and enabled state."""
-    cfg = request.app.state.config
+def list_models():
+    """Return all models from config with their type, label, and enabled state.
+
+    Reads fresh from disk so newly downloaded models appear without a restart.
+    """
+    cfg = _load_yaml_config()
     models = [
         {
             "id": mid,
@@ -392,6 +431,202 @@ async def start_live_asr(req: LiveASRRequest, background_tasks: BackgroundTasks,
     return JSONResponse({"job_id": job_id})
 
 
+@app.post("/api/transcription/file")
+async def transcription_file_upload(
+    background_tasks: BackgroundTasks,
+    request: Request,
+    audio: UploadFile = File(...),
+    model_id: str = Form(...),
+):
+    """Transcribe an uploaded audio file with a selected ASR model.
+
+    Accepts a multipart POST with:
+      - audio    — WAV, MP3, M4A, OGG, WebM, or FLAC
+      - model_id — registry key of an ASR model
+
+    Returns ``{job_id}``; stream progress and result via
+    ``GET /api/benchmark/{job_id}/stream``.
+    """
+    job_id = str(uuid.uuid4())
+    client_ip = request.client.host if request.client else "-"
+    jobs.create_job(job_id)
+
+    audio_bytes = await audio.read()
+    original_name = audio.filename or "upload.bin"
+    suffix = Path(original_name).suffix or ".wav"
+
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+    tmp.write(audio_bytes)
+    tmp.close()
+    tmp_path = tmp.name
+
+    audit_event(
+        "transcription_file_started", client_ip,
+        job_id=job_id, model_id=model_id, audio_filename=original_name,
+    )
+
+    loop = asyncio.get_running_loop()
+
+    async def _run():
+        import os
+        import time
+        import soundfile as sf
+
+        jobs.set_running(job_id)
+        sse = QueueProgressChannel(jobs.get_queue(job_id), loop, job_id)
+        try:
+            info = sf.info(tmp_path)
+            audio_duration_s = info.duration
+
+            sse.send_progress(f"loading {model_id}")
+
+            t_start = time.perf_counter()
+            result = await run_live_asr_async(
+                model_id=model_id,
+                audio_path=tmp_path,
+                channel=NullProgressChannel(),
+                job_id=job_id,
+                save=False,
+            )
+            processing_ms = (time.perf_counter() - t_start) * 1000
+
+            m = result.setdefault("metrics", {})
+            transcript = m.get("full_transcript", "")
+            word_count = len(transcript.split()) if transcript.strip() else 0
+            rtf = processing_ms / (audio_duration_s * 1000) if audio_duration_s > 0 else None
+            wpm = (word_count / audio_duration_s * 60) if audio_duration_s > 0 else None
+
+            m["audio_duration_s"] = round(audio_duration_s, 2)
+            m["processing_ms"] = round(processing_ms)
+            m["rtf"] = round(rtf, 3) if rtf is not None else None
+            m["word_count"] = word_count
+            m["words_per_min"] = round(wpm, 1) if wpm is not None else None
+            result["filename"] = original_name
+
+            jobs.set_done(job_id, result)
+            sse.send_done(result)
+
+        except Exception as exc:
+            logger.exception(
+                "transcription_file_failed model_id=%s", model_id,
+                extra={"job_id": job_id},
+            )
+            jobs.set_failed(job_id, str(exc))
+            sse.send_error(str(exc))
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+    background_tasks.add_task(_run)
+    return JSONResponse({"job_id": job_id})
+
+
+@app.post("/api/transcription/sample")
+async def transcription_sample(
+    req: TranscriptionSampleRequest,
+    background_tasks: BackgroundTasks,
+    request: Request,
+):
+    """Transcribe one of the curated benchmark audio samples.
+
+    Accepts ``{model_id, audio_path}`` where ``audio_path`` is a relative path
+    from ``/api/audio/samples`` (e.g. ``data/benchmark/librispeech/sample_00.wav``).
+
+    The ASR model is kept loaded between requests in ``app.state.asr_cache`` so
+    subsequent calls against the same model pay zero load cost.
+
+    Returns ``{job_id}``; stream result via ``GET /api/benchmark/{job_id}/stream``.
+    """
+    job_id = str(uuid.uuid4())
+    client_ip = request.client.host if request.client else "-"
+    jobs.create_job(job_id)
+
+    audit_event(
+        "transcription_sample_started", client_ip,
+        job_id=job_id, model_id=req.model_id, audio_path=req.audio_path,
+    )
+
+    # Capture before entering the background task closure.
+    asr_cache = request.app.state.asr_cache
+    loop = asyncio.get_running_loop()
+
+    async def _run():
+        import time
+        import soundfile as sf
+
+        jobs.set_running(job_id)
+        sse = QueueProgressChannel(jobs.get_queue(job_id), loop, job_id)
+        try:
+            # Read audio once — used for duration and transcription.
+            audio, sample_rate = sf.read(req.audio_path, dtype="float32")
+            if audio.ndim > 1:
+                audio = audio.mean(axis=1)
+            audio_duration_s = len(audio) / sample_rate
+
+            # Get or load model — keep it in the cache for subsequent requests.
+            if req.model_id not in asr_cache:
+                sse.send_progress(f"loading {req.model_id}")
+                model = ModelFactory.create(req.model_id)
+                await loop.run_in_executor(None, model.load)
+                asr_cache[req.model_id] = model
+                logger.info(
+                    "transcription_cache_miss model_id=%s", req.model_id,
+                    extra={"job_id": job_id},
+                )
+            else:
+                model = asr_cache[req.model_id]
+                logger.info(
+                    "transcription_cache_hit model_id=%s", req.model_id,
+                    extra={"job_id": job_id},
+                )
+
+            sse.send_progress("transcribing")
+
+            def _transcribe():
+                result = model.transcribe(
+                    audio, sample_rate,
+                    source_name=req.audio_path,
+                )
+                return result.full_text
+
+            t_start = time.perf_counter()
+            transcript = await loop.run_in_executor(None, _transcribe)
+            processing_ms = (time.perf_counter() - t_start) * 1000
+
+            word_count = len(transcript.split()) if transcript.strip() else 0
+            rtf = processing_ms / (audio_duration_s * 1000) if audio_duration_s > 0 else None
+            wpm = (word_count / audio_duration_s * 60) if audio_duration_s > 0 else None
+
+            result = {
+                "mode": "transcription",
+                "model_id": req.model_id,
+                "metrics": {
+                    "full_transcript":  transcript,
+                    "audio_duration_s": round(audio_duration_s, 2),
+                    "processing_ms":    round(processing_ms),
+                    "rtf":              round(rtf, 3) if rtf is not None else None,
+                    "word_count":       word_count,
+                    "words_per_min":    round(wpm, 1) if wpm is not None else None,
+                },
+            }
+
+            jobs.set_done(job_id, result)
+            sse.send_done(result)
+
+        except Exception as exc:
+            logger.exception(
+                "transcription_sample_failed model_id=%s", req.model_id,
+                extra={"job_id": job_id},
+            )
+            jobs.set_failed(job_id, str(exc))
+            sse.send_error(str(exc))
+
+    background_tasks.add_task(_run)
+    return JSONResponse({"job_id": job_id})
+
+
 # ---------------------------------------------------------------------------
 # Routes — chat
 # ---------------------------------------------------------------------------
@@ -434,6 +669,26 @@ def _format_llama3_chat(system_prompt: str, messages: list[dict]) -> str:
     return "".join(parts)
 
 
+def _format_gemma_chat(system_prompt: str, messages: list[dict]) -> str:
+    """Format a conversation using the Gemma 3 Instruct chat template.
+
+    Gemma 3 has no native system role — the system prompt is prepended to the
+    first user message.  Template tokens: <start_of_turn> / <end_of_turn>.
+    """
+    parts = []
+    for i, msg in enumerate(messages):
+        role = msg["role"]
+        content = msg["content"]
+        if role == "user":
+            if i == 0 and system_prompt:
+                content = f"{system_prompt}\n\n{content}"
+            parts.append(f"<start_of_turn>user\n{content}<end_of_turn>\n")
+        elif role == "assistant":
+            parts.append(f"<start_of_turn>model\n{content}<end_of_turn>\n")
+    parts.append("<start_of_turn>model\n")
+    return "".join(parts)
+
+
 def _format_chat(model_id: str, system_prompt: str, messages: list[dict], cfg: dict) -> str:
     """Dispatch to the correct chat template based on ``chat_format`` in models.yaml.
 
@@ -443,6 +698,8 @@ def _format_chat(model_id: str, system_prompt: str, messages: list[dict], cfg: d
     chat_format = cfg.get("models", {}).get(model_id, {}).get("chat_format", "phi3")
     if chat_format == "llama3":
         return _format_llama3_chat(system_prompt, messages)
+    if chat_format == "gemma":
+        return _format_gemma_chat(system_prompt, messages)
     return _format_phi3_chat(system_prompt, messages)
 
 
@@ -547,6 +804,89 @@ async def transcribe_and_structure(
         nurse_id=nurse_id,
     )
     return JSONResponse(result)
+
+
+# ---------------------------------------------------------------------------
+# Routes — model catalogue
+# ---------------------------------------------------------------------------
+
+class DownloadRequest(PydanticModel):
+    catalogue_id: str
+    compression: str = "int8"
+    hf_token: str = ""
+    variant: str = "openvino"   # "openvino" | "pytorch"
+
+
+@app.get("/api/catalogue")
+def get_catalogue():
+    """Return the curated model catalogue merged with local disk status."""
+    entries = []
+    for item in CATALOGUE:
+        entries.append({
+            **item,
+            "status": get_model_status(item),
+            "pytorch_status": get_pytorch_status(item) if item.get("type") == "slm" else None,
+        })
+    return JSONResponse(entries)
+
+
+@app.post("/api/catalogue/download")
+async def download_model(req: DownloadRequest, background_tasks: BackgroundTasks, request: Request):
+    """Start a background download+conversion job for a catalogue model.
+
+    Returns ``{job_id}``; stream progress via ``GET /api/benchmark/{job_id}/stream``.
+    """
+    entry = CATALOGUE_BY_ID.get(req.catalogue_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail=f"Catalogue entry '{req.catalogue_id}' not found")
+
+    if req.compression not in entry.get("compression_options", ["int8"]):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Compression '{req.compression}' not supported for '{req.catalogue_id}'",
+        )
+
+    job_id = str(uuid.uuid4())
+    client_ip = request.client.host if request.client else "-"
+    jobs.create_job(job_id)
+    audit_event("model_download_started", client_ip, job_id=job_id,
+                catalogue_id=req.catalogue_id, compression=req.compression)
+
+    loop = asyncio.get_running_loop()
+
+    async def _run():
+        jobs.set_running(job_id)
+        channel = QueueProgressChannel(jobs.get_queue(job_id), loop, job_id)
+        try:
+            if req.variant == "pytorch":
+                result = await loop.run_in_executor(
+                    None, download_pytorch, entry, channel, req.hf_token or None
+                )
+                add_pytorch_to_yaml(entry)
+            else:
+                result = await loop.run_in_executor(
+                    None, download_and_convert, entry, req.compression, channel, req.hf_token or None
+                )
+                add_model_to_yaml(entry, req.compression)
+            channel.send_progress("Model registered in config/models.yaml")
+            # Reload in-memory config so /api/chat uses the correct chat_format
+            # for models that were added while the server was already running.
+            try:
+                request.app.state.config = _load_yaml_config()
+            except Exception:
+                logger.warning("Failed to reload config after download", exc_info=True)
+            jobs.set_done(job_id, result)
+            channel.send_done(result)
+        except Exception as exc:
+            logger.exception("model_download_failed catalogue_id=%s", req.catalogue_id,
+                             extra={"job_id": job_id})
+            jobs.set_failed(job_id, str(exc))
+            audit_event("model_download_failed", client_ip, job_id=job_id,
+                        catalogue_id=req.catalogue_id, error=str(exc))
+            channel.send_error(str(exc))
+
+    background_tasks.add_task(_run)
+    return JSONResponse({"job_id": job_id})
 
 
 # ---------------------------------------------------------------------------

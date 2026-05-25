@@ -57,7 +57,9 @@ Before benchmarking, you need to convert the models from PyTorch to OpenVINO for
 
 **Why convert?** PyTorch models are designed for training and general-purpose inference. OpenVINO converts them into an optimized Intermediate Representation (IR) format that applies INT8 quantization, operator fusion, and Intel CPU-specific optimizations. This is what enables the 3-5× speedup we're testing.
 
-### Convert Phi-3 Mini
+> **You can do this through the web interface instead** — see the [Models tab](#models-tab--model-catalogue) section below. The web UI downloads and converts in one click, with a live progress log.
+
+### Convert Phi-3 Mini (command line)
 
 ```powershell
 python scripts/convert_phi3.py
@@ -67,7 +69,7 @@ python scripts/convert_phi3.py
 
 **Expected time:** ~5-10 minutes (first run only)
 
-### Convert Whisper
+### Convert Whisper (command line)
 
 ```powershell
 python scripts/convert_whisper.py --model medium
@@ -165,6 +167,8 @@ You have two options: **Web Dashboard** (easier) or **Command Line** (faster).
 
 ### Option A: Web Dashboard (Recommended)
 
+The web dashboard is the primary interface for everything: downloading models, running benchmarks, chatting with SLMs, transcribing audio, and reading logs. You do not need to use the command line at all once the server is running.
+
 **1. Start the server:**
 
 ```powershell
@@ -177,20 +181,199 @@ uvicorn web.server:app --reload --port 8000
 http://localhost:8000
 ```
 
-**3. Run a benchmark:**
+The dashboard has four top-level modes selectable from the navigation bar: **Benchmark**, **Chat**, **Transcription**, and **Models**.
 
-- Select a model from the dropdown (e.g., `phi3_pytorch` or `phi3_openvino`)
-- For **SLM models** (Phi-3): Click "Use standard prompt"
-- For **ASR models** (Whisper): Select an audio sample from the dropdown
-- Set warmup runs: `2` (recommended)
-- Set timed runs: `5` (recommended)
-- Click **Start Benchmark**
-- Watch the live progress in the log panel
+---
 
-**4. View results:**
+#### Benchmark Mode
 
-- Go to the **Results** tab to see all past benchmarks
-- Go to the **Compare** tab to compare PyTorch vs OpenVINO side-by-side
+This is the default view when you open the dashboard. It has two panels: a left panel with the run form and run history, and a right panel with tabbed result views.
+
+**Running a benchmark:**
+
+1. Select a model from the **Model** dropdown (e.g., `phi3_pytorch` or `phi3_openvino`). Disabled models are shown grayed out.
+2. A type badge appears below the dropdown showing **SLM** or **ASR**.
+3. Fill in the input:
+   - **SLM models (Phi-3):** A text area appears. Click **Use standard prompt** to auto-fill the standard benchmark prompt from `data/benchmark/slm_prompt.txt`.
+   - **ASR models (Whisper):** A sample picker appears. Select a sample from the grouped dropdown (English — LibriSpeech or French — MLS). The audio file path and reference transcript fill automatically. You can also type a path manually.
+4. Set **Warm-up runs** (recommended: 2) and **Timed runs** (recommended: 5).
+5. Click **Start Benchmark**.
+6. A progress bar and live log panel appear below the button. Each step is streamed in real time from the server.
+7. When complete, the result automatically appears in the **Results** tab on the right.
+
+**Past Runs panel:**
+
+Below the run form is a scrollable list of every benchmark that has been saved. Each entry shows:
+- A colored type badge (A = ASR, S = SLM)
+- The model ID
+- The timestamp
+
+Click any entry to load it into the Results tab. Entries highlighted in blue are currently selected for comparison (A or B) or currently active.
+
+Click **Refresh** to reload the list from the server.
+
+---
+
+#### Results Tab
+
+Displays the full metric table for the selected run.
+
+| Metric shown | Meaning |
+|---|---|
+| Mean / p50 / p95 / Min / Max latency | Latency distribution across timed runs |
+| Mean / p50 / p95 ms/token | Time per output token (SLM only) |
+| Mean tokens/sec | Token throughput (SLM only) |
+| Audio duration | Duration of the input audio file (ASR only) |
+| Real-Time Factor (RTF) | Processing time ÷ audio duration — green if < 1 (faster than real-time) |
+| Words per second | Transcription throughput (ASR only) |
+| WER | Word Error Rate — green < 20%, yellow 20–50%, red > 50% |
+
+Below the metrics table:
+- **Audio player:** If the run used an audio file, a native browser audio player lets you listen to the sample directly.
+- **Transcript box:** The full ASR output is shown in a scrollable code block.
+- **Export JSON:** Downloads the raw result JSON to your machine.
+
+---
+
+#### Compare Tab
+
+Compares two runs side by side.
+
+1. Pick **Run A** from the first dropdown.
+2. Pick **Run B** from the second dropdown.
+3. Click **Compare**.
+
+A table appears with one row per metric. The better value in each row is highlighted green. The **Diff** column shows the relative speedup or percentage improvement. The footer hint reminds you which direction is better for each metric type.
+
+Use this tab to compare `phi3_pytorch` vs `phi3_openvino` directly — the speedup factor appears in the Diff column.
+
+---
+
+#### Chart Tab
+
+Shows a bar chart of mean latency (in ms) for the two runs loaded in the Compare tab.
+
+- Load two runs via the Compare tab first, then switch here.
+- Click **Refresh chart** to redraw after changing the comparison selection.
+
+---
+
+#### Logs Tab
+
+Streams the server's structured log output in real time (auto-refreshes every 5 seconds).
+
+- Use the **level filter** dropdown to show only DEBUG, INFO, WARNING, ERROR, or CRITICAL entries.
+- Each row shows: timestamp, colored level badge, logger name, job ID (when available), and the message.
+- The **Job ID** column links log lines to specific benchmark or download jobs, making it easy to trace what went wrong.
+- Click **Refresh** to force an immediate reload.
+
+---
+
+#### Chat Mode
+
+Lets you send messages to an SLM model and receive streamed responses, with full multi-turn conversation history.
+
+**Setup:**
+1. Navigate to the **Chat** tab in the top navigation bar.
+2. In the **Chat Settings** sidebar, select a model from the **Model** dropdown. Only enabled SLM models appear.
+3. Edit the **System Prompt** if you want to change the assistant's persona or constraints. The default is `"You are a helpful clinical AI assistant."` — you can change it to anything.
+
+**Sending a message:**
+1. Type in the input area at the bottom of the main panel.
+2. Press **Enter** (without Shift) or click **Send**.
+3. The response streams token by token. A blinking cursor shows the model is still generating.
+4. Each assistant bubble shows a **metrics line** after generation completes: latency, tokens/sec, and total tokens.
+
+**Conversation memory:**
+- The full conversation history is maintained server-side for the current session. Each new message includes all prior turns so the model has context.
+- Click **Clear conversation** in the sidebar to wipe history and start fresh.
+- Changing the model mid-conversation is allowed; history is preserved.
+
+**Notes:**
+- The chat endpoint supports Phi-3, Llama-3, and Gemma chat formats automatically — the server picks the correct template based on `chat_format` in `config/models.yaml`.
+- The system prompt applies to the entire conversation and cannot be changed per-message.
+
+---
+
+#### Transcription Mode
+
+Lets you run a single ASR transcription against a curated benchmark sample and immediately see the model output alongside the reference transcript, with accuracy and speed metrics.
+
+**Setup:**
+1. Navigate to the **Transcription** tab in the top navigation bar.
+2. In the **ASR Settings** sidebar, select a model from the **Model** dropdown. Only enabled ASR models appear.
+3. Select a **Sample** from the grouped dropdown. Samples are organized by language:
+   - *English — LibriSpeech*: English audiobook recordings
+   - *French — MLS*: French audiobook recordings
+   
+   The dropdown shows the audio duration and a truncated preview of the reference transcript for each sample.
+
+**Running a transcription:**
+1. Click **Transcribe**.
+2. A new row appears in the main panel immediately, showing:
+   - The audio filename and model used
+   - **ASR** row: the model's live output (streams in, with a blinking cursor while in progress)
+   - **REF** row: the ground-truth reference transcript from the dataset
+3. When complete, a metrics line appears below the two text rows:
+   - Audio duration (seconds)
+   - RTF (Real-Time Factor) — green if faster than real-time, red if slower
+   - Word count
+   - Words per minute (transcription speed)
+   - Processing time in seconds
+
+**Reading the results:**
+- Compare the ASR row directly against the REF row to spot substitution or insertion errors.
+- RTF < 1.0 means the model processes audio faster than it plays — required for real-time clinical use.
+- Run the same sample against `whisper_pytorch` and `whisper_openvino` to compare accuracy and speed visually.
+
+**Clearing history:**
+- Click **Clear history** in the sidebar to remove all transcription runs from the view.
+- This does not affect saved benchmark results.
+
+---
+
+#### Models Tab — Model Catalogue
+
+The Models tab is where you download, convert, and manage all models. You never need to run a conversion script manually — everything the scripts do is available here with a progress log.
+
+**Opening the catalogue:**
+- Click **Models** in the top navigation bar. The catalogue loads automatically.
+- On disk models sort to the top automatically.
+
+**Catalogue layout:**
+- Each model appears as a card with:
+  - A type badge (**ASR** or **SLM**)
+  - A status dot: green = on disk, blue spinning = converting, grey = not downloaded
+  - Model name and a short description
+  - Size in GB, quantization level (INT4 / INT8), and HuggingFace repo name
+
+**Filter bar:**
+- Use the **All / ASR / SLM** filter buttons at the top right to narrow the view.
+
+**Downloading a model:**
+1. Find the model card you want.
+2. For models with multiple compression options (INT4 / INT8), use the dropdown on the card to select which compression level you want.
+3. Click the **OpenVINO** button to download from HuggingFace and convert to OpenVINO INT8 (or INT4).
+   - For SLM models, there is also a **PyTorch (CPU baseline)** button to download the raw PyTorch weights — used to establish the unoptimized baseline for benchmarking.
+4. A progress banner appears at the top of the catalogue showing:
+   - The conversion step name and progress percentage
+   - A live log of every step (model download, quantization, IR export)
+   - A progress bar that fills as conversion advances
+5. When complete, the card's status dot turns green and the button is replaced by a green checkmark badge. The model is immediately available in Benchmark, Chat, and Transcription without restarting the server.
+
+**Gated models (HuggingFace access required):**
+
+Some models (e.g., LLaMA) require you to accept terms on HuggingFace before downloading. If a download fails with an access error:
+1. The banner shows a **"Gated model"** error with two action buttons.
+2. Click **"1. Accept model terms →"** — this opens the model page on HuggingFace. Accept the terms while logged in.
+3. Click **"2. Get / check your token →"** — this opens your HuggingFace token settings. Copy a token with read access.
+4. Paste the token into the **HF Token** field at the top right of the Models header bar.
+5. Click **OpenVINO** again — the download will now succeed.
+
+**After downloading:**
+- The model is registered in `config/models.yaml` automatically.
+- It appears in the Benchmark model dropdown, the Chat model dropdown, and the Transcription model dropdown immediately.
+- No server restart required.
 
 ---
 
@@ -252,6 +435,7 @@ python scripts/run_benchmark.py --model whisper_pytorch --audio data/benchmark/a
 # OpenVINO optimized
 python scripts/run_benchmark.py --model whisper_openvino --audio data/benchmark/asr_audio.wav --reference "REFERENCE_TRANSCRIPT_HERE" --warmup 2 --timed 5
 ```
+
 ### Understanding Warmup vs Timed Runs
 
 Every benchmark runs in two phases:
@@ -297,6 +481,7 @@ Timed runs (5):   Run 1: 93.1s  Run 2: 93.5s  Run 3: 92.9s  Run 4: 93.7s  Run 5:
 | **Mean latency** | Average time to process one request (lower is better) |
 | **ms/token** | Time per output token for SLM models (lower is better) |
 | **WER** | Word Error Rate — transcription accuracy (0% = perfect, lower is better) |
+| **RTF** | Real-Time Factor — processing time ÷ audio duration (< 1.0 = faster than real-time) |
 | **Load memory** | Memory used to load the model |
 | **Inference memory** | Additional memory used during processing |
 
@@ -305,6 +490,7 @@ Timed runs (5):   Run 1: 93.1s  Run 2: 93.5s  Run 3: 92.9s  Run 4: 93.7s  Run 5:
 - **Lower latency** = faster processing
 - **Lower ms/token** = faster text generation
 - **Lower WER** = better transcription accuracy
+- **RTF < 1.0** = model can process audio faster than it plays (required for real-time use)
 - **Speedup 3-5×** = OpenVINO is working correctly
 
 ### Example Interpretation
@@ -345,7 +531,7 @@ You can view and compare these files in the web dashboard (**Results** and **Com
 
 **Problem:** Model hasn't been converted to OpenVINO yet
 
-**Solution:** Run the conversion scripts (Step 1)
+**Solution:** Use the Models tab in the web dashboard to download and convert it, or run the conversion scripts (Step 1)
 
 ### "optimum not found" during conversion
 
@@ -383,6 +569,22 @@ python scripts/download_benchmark_audio.py --lang en --samples 5
 - Close other applications
 - Use smaller Whisper model: `--model tiny` or `base`
 
+### Gated model download fails (401 Unauthorized)
+
+**Problem:** The model requires HuggingFace account acceptance
+
+**Solution:**
+1. Accept the model terms on HuggingFace (the error banner shows a direct link)
+2. Generate a read-access token at `huggingface.co/settings/tokens`
+3. Paste it in the **HF Token** field in the Models tab header
+4. Click the download button again
+
+### Chat or Transcription tab shows "No enabled SLMs / No enabled ASR models"
+
+**Problem:** No models are downloaded yet, or all models are disabled in `config/models.yaml`
+
+**Solution:** Go to the **Models** tab and download at least one SLM (for Chat) or ASR model (for Transcription)
+
 ---
 
 ## Command Reference
@@ -395,7 +597,7 @@ python -m venv .venv
 .\.venv\Scripts\activate
 pip install -r requirements.txt
 
-# 1. Convert models (once)
+# 1. Convert models (once) — or use the web dashboard Models tab
 python scripts/convert_phi3.py
 python scripts/convert_whisper.py --model medium
 
@@ -406,7 +608,21 @@ python scripts/download_benchmark_audio.py --lang en --samples 5
 # 3. Run benchmarks (repeatable)
 python scripts/run_all_benchmarks.py --warmup 2 --timed 5
 
-# 4. Start web dashboard (alternative)
+# 4. Start web dashboard (all-in-one alternative for steps 1-3)
 uvicorn web.server:app --reload --port 8000
 # Then open http://localhost:8000
 ```
+
+### Web Dashboard Quick Reference
+
+| Tab | What you can do |
+|-----|----------------|
+| **Benchmark → Run panel** | Select model, set input, configure warmup/timed runs, start a run, watch live progress |
+| **Benchmark → Past Runs** | Click any saved run to load it into Results; refresh the list |
+| **Benchmark → Results** | Full metric table, audio playback, transcript viewer, export JSON |
+| **Benchmark → Compare** | Pick two runs A/B, see side-by-side metric diff with winner highlighted |
+| **Benchmark → Chart** | Bar chart of mean latency for the two compared runs |
+| **Benchmark → Logs** | Live server log stream; filter by level; auto-refreshes every 5s |
+| **Chat** | Multi-turn conversation with any enabled SLM; customize system prompt; streaming output |
+| **Transcription** | Pick ASR model + benchmark sample; see model output vs reference; RTF and WPM metrics |
+| **Models** | Browse catalogue; download + convert any model to OpenVINO or PyTorch; gated model support |

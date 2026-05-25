@@ -13,17 +13,19 @@ import {
   Platform,
   Modal,
   Pressable,
-  SafeAreaView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { SvgXml } from 'react-native-svg';
 import DashboardPresenter from '../presenters/DashboardPresenter';
 import { AudioSourceBadge, MicInputIcon } from './AudioSourceBadge';
 import { MicPermissionBanner } from './MicPermissionBanner';
 import { useRecordingContext } from '../contexts/RecordingContext';
+import SyncStatusIndicator from '../components/SyncStatusIndicator';
+import { useQueueNotifications } from '../hooks/useQueueNotifications';
 
 // --- SVG icons ---
 
@@ -74,11 +76,16 @@ const closeSvg = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" xm
 
 function BedCard({ bed, name, onPress, isActive }) {
     return (
-        <TouchableOpacity
-            style={[styles.bedCard, isActive && styles.bedCardActive]}
+        <Pressable
+            style={({ pressed }) => [
+                styles.bedCard,
+                isActive && styles.bedCardActive,
+                pressed && styles.bedCardPressed,
+            ]}
             onPress={onPress}
-            activeOpacity={0.7}
+            accessibilityRole="button"
             accessibilityLabel={`Bed ${bed}: ${name || 'unnamed'}${isActive ? ', active' : ''}`}
+            accessibilityHint="Opens patient details"
             accessibilityState={{ selected: isActive }}
         >
             <SvgXml xml={isActive ? bedActiveSvg : bedSvg} width={43} height={43} />
@@ -90,8 +97,8 @@ function BedCard({ bed, name, onPress, isActive }) {
                     {`Bed ${bed}${name ? `: "${name}"` : ''}`}
                 </Text>
             </View>
-        </TouchableOpacity>
-  );
+        </Pressable>
+    );
 }
 
 // --- Pulsing mic button ---
@@ -161,6 +168,7 @@ function DashboardScreen({ navigation, route }) {
   const [confirmVisible, setConfirmVisible] = useState(false);
   const [flushSyncing, setFlushSyncing] = useState(false);
   const [offlineGateVisible, setOfflineGateVisible] = useState(false);
+  const [unsyncedCount, setUnsyncedCount] = useState(0);
   const [cleanupProgress, setCleanupProgress] = useState(false);
   // null → hidden; { success, failedItems, timestamp } → success or error view
   const [cleanupResult, setCleanupResult] = useState(null);
@@ -170,6 +178,8 @@ function DashboardScreen({ navigation, route }) {
   // US23 — show a brief "shift resumed" banner when app relaunched into an active session
   const [resumedBanner, setResumedBanner] = useState(!!route?.params?.resumed);
   const [transcriptionSegments, setTranscriptionSegments] = useState([]);
+
+  const { QueueNotifications } = useQueueNotifications();
 
   useEffect(() => {
     if (!resumedBanner) return;
@@ -193,6 +203,7 @@ function DashboardScreen({ navigation, route }) {
       setConfirmVisible,
       setFlushSyncing,
       setOfflineGateVisible,
+      setUnsyncedCount,
       setCleanupProgress,
       setCleanupResult,
         setActivePatient,
@@ -216,7 +227,7 @@ function DashboardScreen({ navigation, route }) {
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
-          onPress={() => navigation.goBack()}
+          onPress={() => navigation.canGoBack() ? navigation.goBack() : navigation.navigate('ModeSelection')}
           accessibilityLabel="Go back"
         >
           <SvgXml xml={arrowBackSvg} width={24} height={24} />
@@ -270,6 +281,12 @@ function DashboardScreen({ navigation, route }) {
           onPress={() => presenterRef.current?.onToggleSource()}
         />
       </View>
+
+      {/* Offline queue sync status — hidden when idle, non-blocking in all states */}
+      <SyncStatusIndicator />
+
+      {/* Offline queue notifications — transient toasts + persistent storage warning */}
+      <QueueNotifications />
 
       {/* Bed mapping section */}
       <View style={styles.content}>
@@ -386,25 +403,24 @@ function DashboardScreen({ navigation, route }) {
       >
         <View style={styles.dialogBackdrop}>
           <View style={styles.dialogCard}>
-            <Text style={styles.dialogTitle}>Unable to sync</Text>
+            <Text style={styles.dialogTitle}>Unsynced audio</Text>
             <Text style={styles.dialogBody}>
-              This device is offline. Some recorded data has not been uploaded yet.{'\n\n'}
-              You can wait until connectivity is restored, or delete all local data now.
+              {`${unsyncedCount} audio chunk${unsyncedCount !== 1 ? 's are' : ' is'} still unsynced. Wait to sync, or force delete (data will be lost).`}
             </Text>
             <View style={styles.dialogActions}>
               <TouchableOpacity
                 style={[styles.dialogBtn, styles.dialogBtnCancel]}
                 onPress={() => presenterRef.current?.onOfflineGateWait()}
-                accessibilityLabel="Wait for connectivity"
+                accessibilityLabel="Wait for sync to complete"
               >
                 <Text style={styles.dialogBtnCancelText}>Wait</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.dialogBtn, styles.dialogBtnConfirm]}
                 onPress={() => presenterRef.current?.onOfflineGateForceDelete(navigation)}
-                accessibilityLabel="Delete anyway"
+                accessibilityLabel="Force delete — audio chunks will be lost"
               >
-                <Text style={styles.dialogBtnConfirmText}>Delete anyway</Text>
+                <Text style={styles.dialogBtnConfirmText}>Force delete</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -659,6 +675,11 @@ const styles = StyleSheet.create({
     // US21 — active bed highlight
     bedCardActive: {
         opacity: 1,
+    },
+    bedCardPressed: {
+        backgroundColor: '#E8F7F2',
+        borderRadius: 8,
+        opacity: 0.85,
     },
   bedChip: {
     borderWidth: 1,

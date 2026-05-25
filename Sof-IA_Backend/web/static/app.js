@@ -43,6 +43,9 @@ createApp({
     /** @type {LogsStore} */
     const logsStore  = new LogsStore();
 
+    /** @type {CatalogueStore} */
+    const catalogueStore = new CatalogueStore();
+
     /**
      * Currently active right-panel tab.
      * @type {Ref} One of `"results"`, `"compare"`, `"chart"`, or `"logs"`.
@@ -63,8 +66,19 @@ createApp({
       modelStore.models.value.filter(m => m.type === 'slm' && m.enabled)
     );
 
+    /**
+     * ASR models available for the transcription tab (enabled ASRs only).
+     * @type {ComputedRef<ModelMeta[]>}
+     */
+    const asrModels = computed(() =>
+      modelStore.models.value.filter(m => m.type === 'asr' && m.enabled)
+    );
+
     /** @type {ChatStore} — instantiated after slmModels is defined */
     const chat = new ChatStore(slmModels.value);
+
+    /** @type {TranscriptionStore} — instantiated after asrModels is defined */
+    const asr = new TranscriptionStore(asrModels.value);
 
     /**
      * Update chat modelId when the enabled SLM list changes (e.g., after models load).
@@ -75,8 +89,20 @@ createApp({
       }
     });
 
+    /**
+     * Update asr modelId when the enabled ASR list changes (e.g., after models load).
+     */
+    watch(asrModels, (models) => {
+      if (models.length && !models.find(m => m.id === asr.modelId.value)) {
+        asr.modelId.value = models[0].id;
+      }
+    });
+
     /** Template ref for the chat messages container — used for auto-scroll. */
     const chatEl = ref(null);
+
+    /** Template ref for the transcription runs container — used for auto-scroll. */
+    const transcriptionEl = ref(null);
 
     // ------------------------------------------------------------------
     // Derived state spanning multiple stores
@@ -143,6 +169,16 @@ createApp({
       { deep: false }
     );
 
+    /**
+     * Auto-scroll the transcription runs list when a new run is added.
+     */
+    watch(
+      () => asr.runs.value.length,
+      () => nextTick(() => {
+        if (transcriptionEl.value) transcriptionEl.value.scrollTop = transcriptionEl.value.scrollHeight;
+      })
+    );
+
     // ------------------------------------------------------------------
     // Template helpers — functions that read from more than one store
     // ------------------------------------------------------------------
@@ -194,6 +230,19 @@ createApp({
     /** Delegate to ChatStore.clear() */
     function clearChat() { chat.clear(); }
 
+    /** Delegate to TranscriptionStore.transcribe() */
+    function sendTranscription() { asr.transcribe(); }
+
+    /** Delegate to TranscriptionStore.clear() */
+    function clearTranscription() { asr.clear(); }
+
+    /** Set the selected sample from the dropdown index value. */
+    function onTranscriptionSampleSelect(evt) {
+      const idx = evt.target.value;
+      if (idx === '') { asr.selectedSample.value = null; return; }
+      asr.selectedSample.value = modelStore.audioSamples.value[idx] || null;
+    }
+
     // ------------------------------------------------------------------
     // Initialisation
     // ------------------------------------------------------------------
@@ -203,7 +252,7 @@ createApp({
      * enabled model so the form is ready to use without manual interaction.
      */
     onMounted(async () => {
-      await Promise.all([modelStore.init(), histStore.fetchHistory()]);
+      await Promise.all([modelStore.init(), histStore.fetchHistory(), catalogueStore.fetch()]);
       const first = modelStore.models.value.find(m => m.enabled);
       if (first) benchmark.run.value.modelId = first.id;
     });
@@ -221,6 +270,14 @@ createApp({
       chatEl,
       sendChat,
       clearChat,
+
+      // --- asr transcription ---
+      asr,
+      asrModels,
+      transcriptionEl,
+      sendTranscription,
+      clearTranscription,
+      onTranscriptionSampleSelect,
 
       // --- modelStore ---
       models:             modelStore.models,
@@ -259,6 +316,28 @@ createApp({
 
       // --- logsStore ---
       logsStore,
+
+      // --- catalogueStore ---
+      catalogue:               catalogueStore.entries,
+      catalogueFiltered:       catalogueStore.filteredEntries,
+      catalogueLoading:        catalogueStore.loading,
+      catalogueTypeFilter:     catalogueStore.typeFilter,
+      activeDownloadId:        catalogueStore.activeJobId,
+      activeDownloadEntryId:   catalogueStore.activeEntryId,
+      activeDownloadVariant:   catalogueStore.activeVariant,
+      catalogueJobLog:         catalogueStore.jobLog,
+      catalogueJobProgress:    catalogueStore.jobProgress,
+      catalogueJobError:       catalogueStore.jobError,
+      catalogueJobIsGated:     catalogueStore.jobIsGated,
+      catalogueLastEntry:      catalogueStore.lastActiveEntry,
+      catalogueLogEl:          catalogueStore.logEl,
+      compressionFor:          (entry) => catalogueStore.compressionFor(entry),
+      setCatalogueCompression: (id, val) => catalogueStore.setCompression(id, val),
+      downloadModel:           (id, compression, variant) => catalogueStore.startDownload(id, compression, variant),
+      refreshCatalogue:        () => catalogueStore.fetch(),
+      setCatalogueFilter:      (f) => { catalogueStore.typeFilter.value = f; },
+      catalogueHfToken:        catalogueStore.hfToken,
+      catalogueReadyCount:     computed(() => catalogueStore.entries.value.filter(e => e.status === 'downloaded_ov').length),
 
       // --- helpers ---
       fmt,

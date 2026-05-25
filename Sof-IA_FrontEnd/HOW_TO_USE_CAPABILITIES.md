@@ -242,8 +242,8 @@ function StatusBar() {
 
 ### Boolean Flags
 
-| Flag | Android | Web | Usage |
-|------|---------|-----|-------|
+| Flag | Android / iOS | Web | Usage |
+|------|--------------|-----|-------|
 | `hasBluetooth` | ✅ true | ❌ false | Show Bluetooth UI |
 | `hasFileSystem` | ✅ true | ❌ false | Show file operations |
 | `hasBackgroundTasks` | ✅ true | ❌ false | Enable background sync |
@@ -252,11 +252,11 @@ function StatusBar() {
 
 ### String Values
 
-| Flag | Android | Web | Usage |
-|------|---------|-----|-------|
-| `audioRecorder` | `'expo-av'` | `'MediaRecorder'` | Choose audio API |
-| `storage` | `'sqlite'` | `'dexie'` | Choose database |
-| `platform` | `'android'` | `'web'` | Display platform name |
+| Flag | Android | iOS | Web | Usage |
+|------|---------|-----|-----|-------|
+| `audioRecorder` | `'expo-av'` | `'expo-av'` | `'MediaRecorder'` | Choose audio API |
+| `storage` | `'sqlite'` | `'sqlite'` | `'dexie'` | Choose database |
+| `platform` | `'android'` | `'ios'` | `'web'` | Display platform name |
 
 ---
 
@@ -380,17 +380,18 @@ npm run web
 
 ### Quick Console Check
 
-Open DevTools and paste:
+In the Metro bundler or browser DevTools console, import and log capabilities directly:
 
 ```javascript
-// Check capabilities
-console.log(window.__capabilities);
+// In a component or service file — add temporarily for debugging
+import { capabilities } from '../config/capabilities';
+console.log('Capabilities:', capabilities);
 
-// On Android should show:
-// { hasBluetooth: true, hasFileSystem: true, ... }
+// On Android/iOS should show:
+// { hasBluetooth: true, hasFileSystem: true, isNative: true, isWeb: false, ... }
 
 // On Web should show:
-// { hasBluetooth: false, hasFileSystem: false, ... }
+// { hasBluetooth: false, hasFileSystem: false, isNative: false, isWeb: true, ... }
 ```
 
 ---
@@ -511,3 +512,162 @@ async function initRecorder() {
 - ✅ Check before calling native APIs
 - ✅ Use capabilities instead of Platform.OS
 - ✅ Test on both Android and Web
+
+---
+
+# Repository Layer
+
+Unified storage interface for all persistent data. Platform is auto-detected: **SQLite** on Android/iOS, **Dexie (IndexedDB)** on Web.
+
+## Quick Start
+
+```typescript
+import { getStorage } from '@/repositories';
+
+const storage = await getStorage(); // always await — initializes DB on first call
+
+const patient = await storage.create<Patient>("patients", {
+  session_id: "shift_20260325_143022",
+  name: "John Smith",
+  status: PatientStatus.ACTIVE,
+  bed: "301-A",
+  // ...other fields
+});
+
+const retrieved = await storage.read<Patient>("patients", patient.id);
+
+const updated = await storage.update<Patient>("patients", patient.id, {
+  diagnosis: "Pneumonia",
+});
+
+const sessionPatients = await storage.queryBySession<Patient>(
+  "patients",
+  currentSessionId
+);
+
+await storage.delete("patients", patient.id);
+```
+
+Auto-generated on `create`: `id` (UUID v4), `created_at`, `expires_at`, `session_id`.
+
+---
+
+## Platform Adapters
+
+### Android/iOS — `SqliteAdapter`
+
+- Storage: SQLite WAL mode at `<documentDir>/SQLite/sofia.db` (managed by expo-sqlite)
+- Prepared statements (SQL injection protection), foreign key constraints, automatic migrations
+
+### Web — `DexieAdapter`
+
+- Storage: IndexedDB at browser origin (`sofia_db`)
+- Compound indexes, promise-based, automatic schema versioning
+
+**Never instantiate adapters directly** — always use `getStorage()` / `StorageFactory.getInstance()`. (`getRepository()` is a lighter alias from `RepositoryFactory` with no config/monitoring.)
+
+---
+
+## Query Operations
+
+```typescript
+// All records for a session
+const patients = await storage.queryBySession<Patient>("patients", sessionId);
+
+// Bulk delete by field match
+await storage.bulkDelete("patients", { session_id: sessionId });
+
+// Bulk delete by comparison
+await storage.bulkDelete("audio_recordings", {
+  field: "created_at",
+  operator: "<",
+  value: new Date(Date.now() - 86400000).toISOString(),
+});
+
+// Purge all expired records (run at app start or daily)
+const count = await storage.purgeExpired();
+```
+
+---
+
+## Indexed Fields (fast queries)
+
+Prefer these fields in queries — they use indexes:
+
+| Field | Tables |
+|-------|--------|
+| `session_id` | all |
+| `patient_id` | clinical_notes, audio_recordings |
+| `status` | patients, sessions |
+| `expires_at` | all |
+| `[session_id+status]` | compound |
+| `[patient_id+note_type]` | compound |
+
+Fields like `name`, `diagnosis`, `content` have no index — avoid filtering on them at scale.
+
+---
+
+## Testing
+
+```typescript
+import { StorageFactory } from '@/repositories';
+
+// Reset singleton between tests
+afterEach(() => {
+  StorageFactory.reset();
+});
+
+// Mock repository
+const mockRepo: IRepository = {
+  create: jest.fn(),
+  read: jest.fn(),
+  update: jest.fn(),
+  delete: jest.fn(),
+  queryBySession: jest.fn(),
+  queryBySessionAndBed: jest.fn(),
+  findByField: jest.fn(),
+  bulkDelete: jest.fn(),
+  purgeExpired: jest.fn(),
+};
+```
+
+---
+
+## Debugging
+
+**SQLite (Android/iOS):**
+```bash
+# App data is private; copy it out via run-as (debug builds), then inspect
+adb exec-out run-as com.juliocortes.sofia cat files/SQLite/sofia.db > sofia.db
+sqlite3 sofia.db
+.tables
+SELECT * FROM patients;
+```
+
+**Dexie (Web):**
+Chrome DevTools → Application → IndexedDB → `sofia_db`
+
+Migration logs appear in console: `[SQLite] Migration N applied successfully`
+
+---
+
+## Security — PHI
+
+- All patient data is PHI — local storage only (no cloud sync in v1)
+- Data is automatically purged on shift end via `EndShiftService`
+- Encryption at rest handled by the OS on Android/iOS
+- Never store auth tokens in the repository — use `expo-secure-store`
+
+---
+
+## Troubleshooting
+
+**"Table does not exist"** — always `await getRepository()` before any call.
+
+**Foreign key constraint** — create the session before creating patients that reference it.
+
+**Web: IndexedDB quota exceeded** — call `storage.purgeExpired()` on app start or daily.
+
+---
+
+Full interface: `src/repositories/interfaces/IRepository.ts`

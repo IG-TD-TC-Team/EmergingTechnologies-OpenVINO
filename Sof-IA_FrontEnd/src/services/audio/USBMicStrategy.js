@@ -17,24 +17,32 @@ function isUsbDevice(input) {
     return type === 'usbaudio' || USB_KEYWORDS.some((kw) => name.includes(kw));
 }
 
+// Once the API is confirmed missing we stop trying on every poll cycle.
+let _apiAvailable = null;
+
 const USBMicStrategy = {
     /**
      * Returns true if a USB-C mic is currently connected.
      * Always returns false on Web (no USB detection API).
      */
     async isAvailable() {
-        // Web doesn't have USB audio device detection API
-        if (!capabilities.isNative) {
+        if (!capabilities.isNative || _apiAvailable === false) {
             return false;
         }
 
         try {
-            // Dynamic import to avoid bundling expo-av on web
             const { Audio } = await import('expo-av');
             const inputs = await Audio.getAvailableInputsAsync();
+            _apiAvailable = true;
             return inputs.some(isUsbDevice);
         } catch (error) {
-            console.warn('[USBMicStrategy] Failed to check USB availability:', error);
+            if (error instanceof TypeError) {
+                // getAvailableInputsAsync missing in this expo-av version — stop retrying.
+                _apiAvailable = false;
+                console.warn('[USBMicStrategy] Audio.getAvailableInputsAsync not available in this expo-av version');
+            } else {
+                console.warn('[USBMicStrategy] Failed to check USB availability:', error);
+            }
             return false;
         }
     },

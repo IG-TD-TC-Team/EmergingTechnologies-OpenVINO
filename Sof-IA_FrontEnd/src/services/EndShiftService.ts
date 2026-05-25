@@ -20,6 +20,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import { getStorage } from '../repositories';
+import { unregisterBackgroundQueueSync } from '../tasks/backgroundQueueSync';
 import SessionService from './SessionService';
 import StorageKeys from '../constants/storageKeys';
 import { RecordingStatus } from '../models/AudioRecording';
@@ -195,10 +196,11 @@ class EndShiftService {
   // ─── Step 1: background tasks ──────────────────────────────────────────────
 
   private _stopBackgroundTasks(): void {
-    // expo-task-manager is not yet configured (hasBackgroundTasks flag is set,
-    // but no tasks are registered in v1).
-    // When tasks are added: await TaskManager.unregisterAllTasksAsync()
-    console.log('[EndShiftService] stopBackgroundTasks: noop — no tasks registered yet');
+    // Unregister the background queue sync task so the OS stops waking the app
+    // for a logged-out nurse. Fire-and-forget — shift cleanup must not block on this.
+    unregisterBackgroundQueueSync().catch((err) =>
+      console.warn('[EndShiftService] unregisterBackgroundQueueSync error:', err)
+    );
   }
 
   // ─── Step 2: audio file deletion ──────────────────────────────────────────
@@ -227,7 +229,7 @@ class EndShiftService {
   private async _deleteNativeFiles(recordings: any[], errors: string[]): Promise<void> {
     let FileSystem: any;
     try {
-      FileSystem = require('expo-file-system');
+      FileSystem = require('expo-file-system/legacy');
     } catch {
       console.warn('[EndShiftService] expo-file-system unavailable — skipping native file deletion');
       return;

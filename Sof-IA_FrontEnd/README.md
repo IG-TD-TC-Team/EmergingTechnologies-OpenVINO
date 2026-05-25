@@ -56,21 +56,22 @@ npm run web       # Browser
 
 ```
 Sof-IA_FrontEnd/
-├── App.js                  # Entry point — mounts AppNavigator
+├── App.js                  # Entry point — storage init, providers, navigation
 ├── index.js                # Expo root registration
 ├── assets/
 │   └── icons/              # Icons from Figma (SVG) and app logo (PNG)
 ├── src/
-│   ├── models/             # Plain data classes (Patient, Session, ClinicalNote...)
+│   ├── models/             # TypeScript interfaces (Patient, Session, AudioRecording, Transcription, ClinicalNote)
 │   ├── repositories/
-│   │   ├── interfaces/     # Storage contracts (IStorageRepository...)
-│   │   └── adapters/       # SQLiteRepository (Android), IndexedDBRepository (Web)
+│   │   ├── interfaces/     # IRepository (storage contract)
+│   │   └── adapters/       # SqliteAdapter (Android/iOS), DexieAdapter (Web), StorageFactory
 │   ├── services/
-│   │   ├── audio/          # USBMicStrategy, DeviceMicStrategy
-│   │   ├── transcription/  # WhisperStrategy, AzureSTTStrategy
-│   │   ├── extraction/     # NLPExtractionHandler, ClinicalNoteFactory
-│   │   ├── ScriberService.js   # Facade — recording pipeline entry point
-│   │   └── SessionService.js
+│   │   ├── audio/          # ContinuousRecordingService, ExpoAvRecordingStrategy, USBMicStrategy, ...
+│   │   ├── network/        # NetworkMonitor
+│   │   ├── queue/          # OfflineQueueManager, DexieQueueRepository, SQLiteQueueRepository
+│   │   ├── SessionService.ts
+│   │   ├── EndShiftService.ts
+│   │   └── TranscriptionService.js
 │   ├── presenters/         # One Presenter per screen (pure JS, no RN imports)
 │   ├── screens/            # One Screen per route (View only, no business logic)
 │   └── navigation/
@@ -87,15 +88,17 @@ Sof-IA_FrontEnd/
 App launch
     │
     ▼
-LoadingScreen (1.8s splash)
+LoadingScreen
     │
     ├── active shift in storage? ──► DashboardScreen
     │
     └── no shift ──► ModeSelectionScreen
                           │
                           └── "Start working!" ──► DashboardScreen
-                                                        │
-                                                        └── bed card ──► PatientDetailScreen
+                                                        ├── bed card ──► BedDetailScreen
+                                                        │                   ├── CardDetailScreen
+                                                        │                   └── EditPatientScreen
+                                                        └── settings ──► SettingsScreen
 ```
 
 ### Screens implemented
@@ -104,15 +107,18 @@ LoadingScreen (1.8s splash)
 |---|---|---|
 | Loading / Splash | `src/screens/LoadingScreen.js` | Done |
 | Mode Selection | `src/screens/ModeSelectionScreen.js` | Done |
-| Dashboard | `src/screens/DashboardScreen.js` | Placeholder |
-| Patient Detail | — | Not started |
+| Dashboard | `src/screens/DashboardScreen.js` | Done |
+| Bed Detail | `src/screens/BedDetailScreen.js` | Done |
+| Card Detail | `src/screens/CardDetailScreen.js` | Done |
+| Edit Patient | `src/screens/EditPatientScreen.js` | Done |
+| Settings | `src/screens/SettingsScreen.js` | Done |
 
 ---
 
 ## Design Resources
 
 - **Figma designs:** https://www.figma.com/design/xatJv9J3dQWl258H1l4eWM/Sof-IA-HealthCare-assistant
-- **Azure DevOps (user stories):** https://dev.azure.com/Sof-IA/Front-End-React/_workitems/recentlyupdated/
+- **Azure DevOps (user stories):** https://dev.azure.com/Sof-IA/Front-End-React/
 
 ---
 
@@ -238,16 +244,18 @@ const mySvg = `<svg viewBox="0 0 24 24" ...>...</svg>`;
 
 ---
 
-## Local Storage (nurse name & session data)
+## Local Storage
 
-To persist data locally across app restarts:
+All structured data (sessions, patients, recordings, transcriptions, clinical notes) is persisted through the **IRepository layer** — automatically SQLite on Android/iOS and IndexedDB on Web via `StorageFactory`.
 
-```bash
-# Already installed — do not run again
-npx expo install @react-native-async-storage/async-storage
+```typescript
+import { getStorage } from './src/repositories';
+
+const storage = await getStorage();
+const session = await storage.create('sessions', { nurse_name: 'Julia', ... });
 ```
 
-Usage:
+**AsyncStorage** is only used for the nurse name UI preference (non-critical, not session-scoped):
 
 ```js
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -278,13 +286,11 @@ npx expo install expo-av
 
 ---
 
-## Architecture Proposition
-
-> This is a **proposition** — the team should adapt and adopt what makes sense for each feature. Not everything needs to be applied everywhere.
+## Architecture
 
 ### What is Sof-IA?
 
-An **ambient scribe app for nurses**. Nurses use a **USB-C microphone** (e.g. Rhode Mini Wireless) or their **device built-in mic** to continuously capture bedside conversations. Audio is transcribed (Whisper API) and AI-extracted into structured clinical data (medications, vitals, allergies) — all without manual note-taking. Data lives locally on the device and is wiped at shift end.
+An **ambient scribe app for nurses**. Nurses use a **USB-C microphone** (e.g. Rode Wireless Mini) or their **device built-in mic** to continuously capture bedside conversations. Audio is transcribed (Whisper API) and AI-extracted into structured clinical data (medications, vitals, allergies) — all without manual note-taking. Data lives locally on the device and is wiped at shift end.
 
 Runs on **Android** (primary) and **Chrome/Web** (fallback).
 
@@ -296,26 +302,25 @@ Runs on **Android** (primary) and **Chrome/Web** (fallback).
 ┌─────────────────────────────────────────────────────────┐
 │  VIEW LAYER  (React Native Screens)                      │
 │  ModeSelectionScreen, DashboardScreen,                   │
-│  PatientDetailScreen, CorrectionScreen                   │
+│  BedDetailScreen, CardDetailScreen, EditPatientScreen    │
 └──────────────────────┬──────────────────────────────────┘
                        │ (interface only — no logic here)
 ┌──────────────────────▼──────────────────────────────────┐
-│  PRESENTER LAYER  (pure JS classes, no RN imports)       │
-│  ModeSelectionPresenter, DashboardPresenter, ...         │
+│  PRESENTER LAYER  (pure JS classes, no RN imports)      │
+│  ModeSelectionPresenter, DashboardPresenter, ...        │
 └──────────────────────┬──────────────────────────────────┘
                        │
 ┌──────────────────────▼──────────────────────────────────┐
-│  SERVICE LAYER  (Facade + Strategy + Chain)              │
-│  ScriberService (Facade), AudioCaptureService,           │
-│  TranscriptionService, AIExtractionService,              │
-│  SessionService, PatientService                          │
+│  SERVICE LAYER                                          │
+│  ContinuousRecordingService, TranscriptionService,      │
+│  SessionService, EndShiftService, OfflineQueueManager   │
 └──────────────────────┬──────────────────────────────────┘
                        │
 ┌──────────────────────▼──────────────────────────────────┐
-│  REPOSITORY LAYER  (Adapter pattern)                     │
-│  IStorageRepository                                      │
-│  ├── SQLiteRepository  (Android — expo-sqlite)           │
-│  └── IndexedDBRepository  (Web — Dexie.js)               │
+│  REPOSITORY LAYER  (Adapter pattern)                    │
+│  IRepository                                            │
+│  ├── SqliteAdapter  (Android/iOS — expo-sqlite)         │
+│  └── DexieAdapter   (Web — Dexie.js)                    │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -327,17 +332,18 @@ Runs on **Android** (primary) and **Chrome/Web** (fallback).
 
 ```
 src/
-├── models/             # Plain data classes: Patient, Session, ClinicalNote, Transcription
+├── models/             # TypeScript interfaces: Patient, Session, AudioRecording, Transcription, ClinicalNote
 ├── repositories/
-│   ├── interfaces/     # IStorageRepository, IPatientRepository (contracts)
-│   ├── adapters/       # SQLiteRepository (Android), IndexedDBRepository (Web)
+│   ├── interfaces/     # IRepository (storage contract)
+│   ├── adapters/       # SqliteAdapter (Android/iOS), DexieAdapter (Web), StorageFactory
 │   └── PatientRepository.js
 ├── services/
-│   ├── audio/          # USBMicStrategy, DeviceMicStrategy
-│   ├── transcription/  # WhisperStrategy, AzureSTTStrategy
-│   ├── extraction/     # NLPExtractionHandler, ClinicalNoteFactory
-│   ├── ScriberService.js   # Facade — single entry point for recording pipeline
-│   └── SessionService.js
+│   ├── audio/          # ContinuousRecordingService, ExpoAvRecordingStrategy, USBMicStrategy, ...
+│   ├── network/        # NetworkMonitor
+│   ├── queue/          # OfflineQueueManager, platform-specific repositories
+│   ├── SessionService.ts
+│   ├── EndShiftService.ts
+│   └── TranscriptionService.js
 ├── presenters/         # One per screen (pure JS, no React Native imports)
 ├── screens/            # One per screen (View only, no business logic)
 └── navigation/
@@ -363,14 +369,6 @@ src/
 | **Facade** | `ScriberService` | Hides audio + transcription + AI complexity from Presenters |
 
 ---
-
-### Recording State Machine (v1 — always-on)
-
-```
-Idle ◄── mic button ──► Recording ──► Processing (background) ──► Saved
-```
-
-> `Review` step is a future feature. In v1, processing and saving happen automatically.
 
 ### Shift State Machine
 
@@ -471,20 +469,20 @@ Idle ◄──────────────────── mic button 
 | What | File | Why |
 |---|---|---|
 | Centralized storage keys | `src/constants/storageKeys.js` | One place to update when keys move to the API |
-| `SessionService` | `src/services/SessionService.js` | **Only this file changes** when the API arrives — Presenters stay untouched |
+| `SessionService` | `src/services/SessionService.ts` | **Only this file changes** when the API arrives — Presenters stay untouched |
 | Presenters use `SessionService` | `LoadingPresenter`, `ModeSelectionPresenter` | No direct `AsyncStorage` calls in business logic |
 
 ### When the API arrives — what to change
 
-**`SessionService.js` is the single migration point.** Replace each method body:
+**`SessionService.ts` is the single migration point.** Replace each method body:
 
 | Method | v1 (local) | vFuture (API) |
 |---|---|---|
 | `getNurseName()` | `AsyncStorage.getItem(...)` | `GET /auth/me → response.nurse_name` |
 | `saveNurseName()` | `AsyncStorage.setItem(...)` | `PATCH /auth/profile { nurse_name }` |
-| `getActiveShift()` | `AsyncStorage.getItem(...)` | `GET /sessions/active` |
-| `startShift()` | `AsyncStorage.setItem(...)` | `POST /sessions { nurse_name, started_at }` |
-| `endShift()` | `AsyncStorage.removeItem(...)` | `DELETE /sessions/:id` |
+| `getActiveShift()` | `IRepository.findByField('sessions', 'status', 'active')` | `GET /sessions/active` |
+| `startShift()` | `IRepository.create('sessions', { ... })` | `POST /sessions { nurse_name, started_at }` |
+| `endShift()` | `IRepository.update('sessions', id, { status: 'ended' })` | `PATCH /sessions/:id { status: 'ended' }` |
 
 No Presenter or Screen needs to change.
 
@@ -494,11 +492,9 @@ These are conscious shortcuts made in v1 that will need attention before connect
 
 1. **No `AuthService`** — The logout button is reserved for future auth but there is no auth interface yet. When auth arrives (SSO, JWT, hospital directory), create `src/services/AuthService.js` and wire it to the logout button in `ModeSelectionScreen`.
 
-2. **No `Repository` layer implemented** — The architecture plans a Repository layer (Adapter pattern for SQLite/IndexedDB) but it is not built yet. All data is going through `SessionService` directly for now. Build repositories when the Dashboard and patient data features are implemented.
+2. **Session object is minimal** — `startShift()` currently stores only `nurse_name` and `started_at`. The future API will expect more fields (device ID, app version, shift type, etc.). Extend the session object in `SessionService.startShift()` before the API integration.
 
-3. **Session object is minimal** — `startShift()` currently stores only `nurse_name` and `started_at`. The future API will expect more fields (device ID, app version, shift type, etc.). Extend the session object in `SessionService.startShift()` before the API integration.
-
-4. **No token storage** — When the API introduces JWT or session tokens, a secure storage solution is needed. Do **not** store tokens in `AsyncStorage` (not encrypted). Use `expo-secure-store` instead.
+3. **No token storage** — When the API introduces JWT or session tokens, a secure storage solution is needed. Do **not** store tokens in `AsyncStorage` (not encrypted). Use `expo-secure-store` instead.
    ```bash
    npx expo install expo-secure-store
    ```

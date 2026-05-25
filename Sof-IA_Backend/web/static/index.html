@@ -6,7 +6,7 @@
   <title>OpenVino Benchmark Dashboard</title>
   <script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.prod.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-  <link rel="stylesheet" href="/static/app.css" />
+  <link rel="stylesheet" href="/static/app.css?v=6" />
   <!--
     Script load order matters in CDN (non-module) mode:
       1. Vue + Chart.js globals
@@ -40,9 +40,10 @@
 
   <!-- Mode navigation -->
   <nav class="mode-nav">
-    <button class="mode-btn" :class="{active: mode==='benchmark'}" @click="mode='benchmark'">Benchmark</button>
-    <button class="mode-btn" :class="{active: mode==='chat'}"      @click="mode='chat'">Chat</button>
+    <button class="mode-btn" :class="{active: mode==='benchmark'}"    @click="mode='benchmark'">Benchmark</button>
+    <button class="mode-btn" :class="{active: mode==='chat'}"          @click="mode='chat'">Chat</button>
     <button class="mode-btn" :class="{active: mode==='transcription'}" @click="mode='transcription'">Transcription</button>
+    <button class="mode-btn" :class="{active: mode==='models'}"        @click="mode='models'; refreshCatalogue()">Models</button>
   </nav>
 
   <!-- ================================================================
@@ -243,14 +244,6 @@
                   <td class="metric-val">{{ activeResult.metrics.words_per_sec.toFixed(2) }} w/s</td>
                 </tr>
               </template>
-              <tr v-if="activeResult.metrics.peak_memory_mb != null">
-                <td>Peak working set</td>
-                <td class="metric-val">{{ fmt(activeResult.metrics.peak_memory_mb) }} MB</td>
-              </tr>
-              <tr v-if="activeResult.metrics.load_memory_mb != null">
-                <td>Model load RSS delta</td>
-                <td class="metric-val">{{ fmt(activeResult.metrics.load_memory_mb) }} MB</td>
-              </tr>
               <tr v-if="activeResult.metrics.wer != null">
                 <td><strong>WER</strong></td>
                 <td class="metric-val" :style="{color: activeResult.metrics.wer < 0.2 ? '#6ee7b7' : activeResult.metrics.wer < 0.5 ? '#fbbf24' : '#fca5a5'}">
@@ -469,20 +462,316 @@
   <!-- ================================================================
        MODE: Transcription
        ================================================================ -->
-  <div v-else-if="mode==='transcription'" class="coming-soon">
-    Transcription — coming soon
+  <div class="chat-layout" v-else-if="mode==='transcription'">
+
+    <!-- Sidebar: settings -->
+    <div class="chat-sidebar">
+      <div class="card">
+        <h2>ASR Settings</h2>
+
+        <label>Model</label>
+        <select v-model="asr.modelId.value" :disabled="asr.busy.value">
+          <option v-if="asrModels.length === 0" value="" disabled>No enabled ASR models</option>
+          <option v-for="m in asrModels" :key="m.id" :value="m.id">{{ m.label }}</option>
+        </select>
+
+        <label style="margin-top:.75rem;">Sample</label>
+        <select :disabled="asr.busy.value" @change="onTranscriptionSampleSelect">
+          <option value="">— select a sample —</option>
+          <template v-for="(samples, lang) in audioSamplesByLang" :key="lang">
+            <optgroup :label="lang === 'en' ? 'English — LibriSpeech' : lang === 'fr' ? 'French — MLS' : lang.toUpperCase()">
+              <option v-for="s in samples" :key="s.file" :value="audioSamples.indexOf(s)">
+                {{ s.duration_s }}s &nbsp;·&nbsp; {{ s.reference.slice(0, 40) }}{{ s.reference.length > 40 ? '…' : '' }}
+              </option>
+            </optgroup>
+          </template>
+        </select>
+
+        <div v-if="asr.selectedSample.value" class="hint" style="margin-top:.4rem;">
+          {{ asr.selectedSample.value.duration_s }}s &nbsp;·&nbsp; {{ asr.selectedSample.value.language.toUpperCase() }}
+        </div>
+
+        <button class="btn btn-primary" style="width:100%;margin-top:.75rem;"
+          :disabled="asr.busy.value || !asr.selectedSample.value"
+          @click="sendTranscription">
+          {{ asr.busy.value ? '…' : 'Transcribe' }}
+        </button>
+
+        <button class="btn btn-secondary" style="width:100%;margin-top:.5rem;"
+          :disabled="asr.busy.value || asr.runs.value.length === 0"
+          @click="clearTranscription">
+          Clear history
+        </button>
+      </div>
+    </div>
+
+    <!-- Main: runs list -->
+    <div class="card chat-main">
+
+      <!-- Runs list -->
+      <div class="chat-messages" ref="transcriptionEl">
+        <div v-if="asr.runs.value.length === 0" class="empty" style="align-self:center;margin:auto;">
+          Select a sample and click Transcribe.
+        </div>
+        <div v-for="(run, i) in asr.runs.value" :key="i" class="asr-run">
+
+          <!-- Header: filename + model -->
+          <div class="asr-run-header">
+            <span class="asr-run-file">{{ run.filename }}</span>
+            <span class="asr-run-model">{{ run.model_id }} &nbsp;·&nbsp; {{ run.language ? run.language.toUpperCase() : '' }}</span>
+          </div>
+
+          <!-- ASR output -->
+          <div class="asr-run-text-row">
+            <span class="asr-run-label asr-label-asr">ASR</span>
+            <span class="asr-run-transcript">
+              <span v-if="run.streaming && !run.transcript" style="color:#64748b;font-style:italic;">transcribing…</span>
+              <span v-else>{{ run.transcript }}</span>
+              <span v-if="run.streaming" class="chat-cursor"></span>
+            </span>
+          </div>
+
+          <!-- Reference -->
+          <div class="asr-run-text-row">
+            <span class="asr-run-label asr-label-ref">REF</span>
+            <span class="asr-run-reference">{{ run.reference }}</span>
+          </div>
+
+          <!-- Metrics -->
+          <div v-if="run.metrics" class="chat-metrics">
+            <span v-if="run.metrics.audio_duration_s != null">{{ run.metrics.audio_duration_s.toFixed(1) }}s audio</span>
+            <span v-if="run.metrics.rtf != null">
+              &nbsp;·&nbsp; RTF {{ run.metrics.rtf.toFixed(3) }}
+              <span :style="{color: run.metrics.rtf < 1 ? '#6ee7b7' : '#fca5a5'}">
+                ({{ run.metrics.rtf < 1 ? 'faster' : 'slower' }} than real-time)
+              </span>
+            </span>
+            <span v-if="run.metrics.word_count != null">&nbsp;·&nbsp; {{ run.metrics.word_count }} words</span>
+            <span v-if="run.metrics.words_per_min != null">&nbsp;·&nbsp; {{ run.metrics.words_per_min.toFixed(0) }} WPM</span>
+            <span v-if="run.metrics.processing_ms != null">&nbsp;·&nbsp; {{ (run.metrics.processing_ms / 1000).toFixed(1) }}s processing</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Error -->
+      <div v-if="asr.error.value" style="font-size:.8rem;color:#fca5a5;padding:.3rem 0;">
+        {{ asr.error.value }}
+      </div>
+
+      <!-- Status -->
+      <div v-if="asr.status.value" style="font-size:.8rem;color:#94a3b8;padding:.2rem 0;">
+        {{ asr.status.value }}
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ================================================================
+       MODE: Models
+       ================================================================ -->
+  <div v-else-if="mode==='models'" class="catalogue-page">
+
+    <!-- ── Header bar ──────────────────────────────────────────────── -->
+    <div class="catalogue-header">
+      <div class="catalogue-header-left">
+        <h2 style="margin:0;font-size:1rem;">Model Catalogue</h2>
+        <span class="catalogue-stat">
+          <span :style="{color: catalogueReadyCount > 0 ? '#6ee7b7' : '#64748b'}">
+            {{ catalogueReadyCount }}
+          </span>
+          <span style="color:#64748b;">&nbsp;/ {{ catalogue.length }} on disk</span>
+        </span>
+      </div>
+      <div class="catalogue-header-right">
+        <input
+          type="password"
+          v-model="catalogueHfToken"
+          placeholder="HF Token (gated models)"
+          autocomplete="off"
+          class="hf-token-input"
+          title="HuggingFace access token — required for gated models like MedGemma or LLaMA"
+        />
+        <div class="catalogue-filter-tabs">
+          <button class="catalogue-filter-btn" :class="{active: catalogueTypeFilter==='all'}"   @click="setCatalogueFilter('all')">All</button>
+          <button class="catalogue-filter-btn" :class="{active: catalogueTypeFilter==='asr'}"   @click="setCatalogueFilter('asr')">ASR</button>
+          <button class="catalogue-filter-btn" :class="{active: catalogueTypeFilter==='slm'}"   @click="setCatalogueFilter('slm')">SLM</button>
+        </div>
+        <button class="btn btn-secondary btn-sm" :disabled="catalogueLoading || !!activeDownloadId" @click="refreshCatalogue">
+          {{ catalogueLoading ? 'Loading…' : 'Refresh' }}
+        </button>
+      </div>
+    </div>
+
+    <!-- ── Download progress banner (only when a job is active) ───── -->
+    <div class="catalogue-progress-banner" v-if="catalogueJobLog.length">
+      <div class="catalogue-progress-banner-top">
+        <span style="font-size:.8rem;font-weight:600;color:#93c5fd;">
+          {{ catalogueJobError ? 'Failed' : catalogueJobProgress === 100 ? 'Complete' : 'Converting…' }}
+          &nbsp;
+          <span style="font-weight:400;color:#94a3b8;">{{ activeDownloadEntryId }}</span>
+        </span>
+        <span style="font-size:.75rem;color:#64748b;">{{ catalogueJobProgress }}%</span>
+      </div>
+      <div class="progress-bar-wrap" style="margin:.4rem 0;">
+        <div class="progress-bar-fill" :style="{width: catalogueJobProgress + '%',
+          background: catalogueJobError ? '#ef4444' : catalogueJobProgress === 100 ? '#22c55e' : '#3b82f6'}">
+        </div>
+      </div>
+      <div class="log" ref="catalogueLogEl" style="max-height:120px;">
+        <div v-for="(line, i) in catalogueJobLog" :key="i">{{ line }}</div>
+      </div>
+      <div v-if="catalogueJobError" style="margin-top:.4rem;">
+        <template v-if="catalogueJobIsGated && catalogueLastEntry">
+          <div class="gated-error-box">
+            <div style="font-size:.8rem;font-weight:600;color:#fca5a5;margin-bottom:.5rem;">
+              Gated model — HuggingFace access required
+            </div>
+            <div class="gated-error-links">
+              <a
+                :href="'https://huggingface.co/' + catalogueLastEntry.hub_id"
+                target="_blank"
+                rel="noopener"
+                class="btn btn-primary btn-sm"
+              >1. Accept model terms &rarr;</a>
+              <a
+                href="https://huggingface.co/settings/tokens"
+                target="_blank"
+                rel="noopener"
+                class="btn btn-secondary btn-sm"
+              >2. Get / check your token &rarr;</a>
+            </div>
+            <div style="font-size:.72rem;color:#94a3b8;margin-top:.5rem;">
+              Then paste your token in the HF Token field above and click Download &amp; Convert again.
+            </div>
+          </div>
+        </template>
+        <template v-else>
+          <div style="font-size:.75rem;color:#fca5a5;white-space:pre-line;line-height:1.6;">{{ catalogueJobError }}</div>
+        </template>
+      </div>
+      <div v-if="catalogueJobProgress === 100 && !catalogueJobError"
+           style="margin-top:.4rem;font-size:.75rem;color:#6ee7b7;">
+        Model added. It now appears in the Benchmark &amp; Chat tabs.
+      </div>
+    </div>
+
+    <!-- ── Empty / loading states ──────────────────────────────────── -->
+    <div v-if="catalogueLoading && catalogue.length === 0" class="empty" style="padding:3rem;text-align:center;">
+      Loading catalogue…
+    </div>
+    <div v-else-if="!catalogueLoading && catalogue.length === 0" class="empty" style="padding:3rem;text-align:center;">
+      No models in catalogue. Check server logs.
+    </div>
+
+    <!-- ── Model grid ──────────────────────────────────────────────── -->
+    <div v-else class="model-grid">
+      <div
+        v-for="entry in catalogueFiltered"
+        :key="entry.id"
+        class="model-card"
+        :class="entry.status"
+      >
+        <!-- Status stripe (left border color handled by CSS class) -->
+
+        <!-- Header row: type badge + status indicator -->
+        <div class="model-card-header">
+          <span class="model-type-badge" :class="entry.type === 'slm' ? 'badge-slm' : 'badge-asr'">
+            {{ entry.type.toUpperCase() }}
+          </span>
+          <span v-if="entry.status === 'downloaded_ov'" class="mc-status-dot mc-dot-ready" title="On disk"></span>
+          <span v-else-if="entry.status === 'downloading'" class="mc-status-dot mc-dot-busy" title="Converting…"></span>
+          <span v-else class="mc-status-dot mc-dot-off" title="Not downloaded"></span>
+        </div>
+
+        <!-- Title -->
+        <div class="model-card-title">{{ entry.label }}</div>
+
+        <!-- Notes -->
+        <div class="model-card-notes">{{ entry.notes }}</div>
+
+        <!-- Spacer pushes action row to bottom -->
+        <div style="flex:1;"></div>
+
+        <!-- Meta line -->
+        <div class="model-card-meta">
+          <span>{{ entry.size_gb }} GB</span>
+          <span class="mc-sep">·</span>
+          <span>{{ compressionFor(entry).toUpperCase() }}</span>
+          <span class="mc-sep">·</span>
+          <span class="model-card-hub" :title="entry.hub_id">{{ entry.hub_id.split('/')[1] }}</span>
+        </div>
+
+        <!-- Action row — OpenVINO -->
+        <div class="model-card-actions">
+          <template v-if="entry.status === 'downloaded_ov'">
+            <span class="badge-downloaded">&#10003; OpenVINO</span>
+          </template>
+          <template v-else-if="entry.status === 'downloading' && activeDownloadVariant === 'openvino'">
+            <span class="badge-downloading">
+              <span class="mc-spinner"></span> Converting…
+            </span>
+          </template>
+          <template v-else>
+            <select
+              v-if="entry.compression_options.length > 1"
+              :disabled="!!activeDownloadId"
+              :value="compressionFor(entry)"
+              @change="setCatalogueCompression(entry.id, $event.target.value)"
+              class="mc-compression-select"
+            >
+              <option v-for="opt in entry.compression_options" :key="opt" :value="opt">
+                {{ opt.toUpperCase() }}
+              </option>
+            </select>
+            <button
+              class="btn btn-primary btn-sm"
+              style="flex:1;"
+              :disabled="!!activeDownloadId"
+              @click="downloadModel(entry.id, compressionFor(entry), 'openvino')"
+            >
+              OpenVINO
+            </button>
+          </template>
+        </div>
+
+        <!-- Action row — PyTorch (SLM only) -->
+        <div v-if="entry.type === 'slm'" class="model-card-actions" style="margin-top:.3rem;">
+          <template v-if="entry.pytorch_status === 'downloaded'">
+            <span class="badge-downloaded" style="background:#1e3a5f;color:#93c5fd;">&#10003; PyTorch</span>
+          </template>
+          <template v-else-if="entry.pytorch_status === 'downloading' && activeDownloadVariant === 'pytorch'">
+            <span class="badge-downloading">
+              <span class="mc-spinner"></span> Downloading…
+            </span>
+          </template>
+          <template v-else>
+            <button
+              class="btn btn-secondary btn-sm"
+              style="flex:1;"
+              :disabled="!!activeDownloadId"
+              @click="downloadModel(entry.id, 'int8', 'pytorch')"
+            >
+              PyTorch (CPU baseline)
+            </button>
+          </template>
+        </div>
+      </div>
+    </div>
+
   </div>
 
 </div>
 
-<script src="/static/api.js"></script>
-<script src="/static/composables/models.js"></script>
-<script src="/static/composables/benchmark.js"></script>
-<script src="/static/composables/history.js"></script>
-<script src="/static/composables/compare.js"></script>
-<script src="/static/composables/chart.js"></script>
-<script src="/static/composables/logs.js"></script>
-<script src="/static/composables/chat.js"></script>
-<script src="/static/app.js"></script>
+<script src="/static/api.js?v=6"></script>
+<script src="/static/composables/models.js?v=6"></script>
+<script src="/static/composables/benchmark.js?v=6"></script>
+<script src="/static/composables/history.js?v=6"></script>
+<script src="/static/composables/compare.js?v=6"></script>
+<script src="/static/composables/chart.js?v=6"></script>
+<script src="/static/composables/logs.js?v=6"></script>
+<script src="/static/composables/chat.js?v=6"></script>
+<script src="/static/composables/catalogue.js?v=6"></script>
+<script src="/static/composables/transcription.js?v=6"></script>
+<script src="/static/app.js?v=6"></script>
 </body>
 </html>

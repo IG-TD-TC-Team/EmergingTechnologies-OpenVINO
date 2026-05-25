@@ -58,7 +58,7 @@ const ShiftCleanupService = {
     } else if (Platform.OS !== 'web') {
       // Native: delete from filesystem
       try {
-        const FileSystem = require('expo-file-system');
+        const FileSystem = require('expo-file-system/legacy');
         const info = await FileSystem.getInfoAsync(filePath);
         if (info.exists) {
           await FileSystem.deleteAsync(filePath, { idempotent: true });

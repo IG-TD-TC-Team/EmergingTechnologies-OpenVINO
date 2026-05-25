@@ -1,12 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  SafeAreaView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { SvgXml } from 'react-native-svg';
 import ModeSelectionPresenter from '../presenters/ModeSelectionPresenter';
 
@@ -85,10 +85,13 @@ function ModeSelectionScreen({ navigation }) {
           </Text>
         </TouchableOpacity>
 
-        {/* Customize Sofia — disabled, future sprint */}
-        <TouchableOpacity style={[styles.modeButton, styles.modeButtonDisabled]} disabled>
+        {/* Customize Sofia */}
+        <TouchableOpacity
+          style={styles.modeButton}
+          onPress={() => presenter.onCustomizeSofia(navigation)}
+        >
           <SvgXml xml={settingsSvg} width={48} height={48} />
-          <Text style={[styles.modeLabel, styles.modeLabelDisabled]}>Customize Sofia</Text>
+          <Text style={styles.modeLabel}>Customize Sofia</Text>
         </TouchableOpacity>
       </View>
     </SafeAreaView>

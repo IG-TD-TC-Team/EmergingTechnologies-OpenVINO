@@ -91,16 +91,26 @@ Open **http://localhost:8000** — the full dashboard loads from there.
 
 ## Model Registry
 
-Configured in `config/models.yaml`. Toggle `enabled: true/false` to control which models appear in the dashboard without touching code.
+The model list is **dynamic**. Models come from two sources:
 
-| ID | Label | Type | Backend | Status |
-|----|-------|------|---------|--------|
+1. **`config/models.yaml`** — the declared registry. Toggle `enabled: true/false` to control which models appear in the dashboard without touching code, or add a new entry (set `class`, `hub_id`, `model_path`, `type`) to register another model.
+2. **The dashboard catalogue** — users can **download and convert (to OpenVINO IR) additional models at runtime** via `GET /api/catalogue` and `POST /api/catalogue/download` (backed by `src/model_manager/`). Downloaded models then appear alongside the declared ones.
+
+The table below lists the models declared in `models.yaml` today — it is the default set, **not** an exhaustive or fixed list.
+
+| ID | Label | Type | Backend | Notes |
+|----|-------|------|---------|-------|
 | `phi3_pytorch` | Phi-3 Mini 4k — PyTorch CPU | SLM | PyTorch | Ready |
-| `phi3_openvino` | Phi-3 Mini 4k — OpenVINO INT8 | SLM | OpenVINO | Ready (convert first) |
+| `phi3_openvino` | Phi-3 Mini 4k — OpenVINO INT8 | SLM | OpenVINO | Convert/download first |
 | `apertus_pytorch` | Apertus 8B Instruct — PyTorch CPU | SLM | PyTorch | Ready |
-| `apertus_openvino` | Apertus 8B Instruct — OpenVINO INT4 | SLM | OpenVINO | Ready (auto-exports on first run) |
+| `apertus_openvino` | Apertus 8B Instruct — OpenVINO INT4 | SLM | OpenVINO | Auto-exports on first run |
+| `qwen2_5_1_5b_int8_pytorch` | Qwen 2.5 1.5B — PyTorch | SLM | PyTorch | Generic loader; download via catalogue |
+| `qwen2_5_1_5b_int8` | Qwen 2.5 1.5B — OpenVINO INT8 | SLM | OpenVINO | Generic loader; download/convert via catalogue |
+| `qwen2_5_7b_int4` | Qwen 2.5 7B — OpenVINO INT4 | SLM | OpenVINO | Generic loader; download/convert via catalogue |
 | `whisper_pytorch` | Whisper Medium — PyTorch CPU | ASR | PyTorch | Ready |
-| `whisper_openvino` | Whisper Medium — OpenVINO INT8 | ASR | OpenVINO | Ready (convert first) |
+| `whisper_openvino` | Whisper Medium — OpenVINO INT8 | ASR | OpenVINO | Convert/download first |
+
+> Qwen models use the generic loaders (`GenericSLMPyTorch` / `GenericSLMOpenVINO`), so any compatible HuggingFace causal LM can be added the same way — by config entry or catalogue download — without new Python classes.
 
 ---
 
@@ -115,7 +125,9 @@ BaseModel  (ABC)
 │       ├── Phi3PyTorch
 │       ├── Phi3OpenVINO
 │       ├── ApertusPyTorch
-│       └── ApertusOpenVINO
+│       ├── ApertusOpenVINO
+│       ├── GenericSLMPyTorch     # any HF causal LM (e.g. Qwen) — PyTorch
+│       └── GenericSLMOpenVINO    # any HF causal LM (e.g. Qwen) — OpenVINO
 └── ASRBase  (ABC)               run(audio_path) -> str
     ├── WhisperPyTorch
     └── StreamingASRBase  (ABC)  + transcribe_stream(chunks) -> Generator[partial, ...]
@@ -150,14 +162,22 @@ BaseModel  (ABC)
 | `GET` | `/api/benchmark/{job_id}` | Poll job status (fallback if SSE unavailable) |
 | `POST` | `/api/live/slm` | Start token-by-token SLM streaming job |
 | `POST` | `/api/live/asr` | Start chunk-by-chunk ASR streaming job |
-| `GET` | `/api/logs` | Last N structured log entries |
+| `GET` | `/api/logs` | Last N structured log entries (filterable by level) |
+| `POST` | `/api/chat` | Send a message and start a streaming SLM response → returns `{job_id}` |
+| `DELETE` | `/api/chat` | Clear the in-memory chat session |
+| `GET` | `/api/chat/history` | Return the current conversation as a list of messages |
+| `POST` | `/api/transcription/file` | Upload an audio file (WAV/MP3/M4A/OGG/WebM/FLAC) for ASR → returns `{job_id}` |
+| `POST` | `/api/transcription/sample` | Transcribe a curated benchmark sample by path → returns `{job_id}` |
+| `GET` | `/api/catalogue` | Return the model catalogue merged with local disk status |
+| `POST` | `/api/catalogue/download` | Start a background download + OpenVINO conversion job → returns `{job_id}` |
+| `POST` | `/api/voice/transcribe-and-structure` | Full voice pipeline — transcribe audio chunk and extract structured clinical data |
 
 ---
 
 ## Repository Structure
 
 ```
-OpenVino/
+Sof-IA_Backend/
 ├── README.md                          ← You are here
 ├── OPENVINO_PRESENTATION.md           ← Technology deep-dive
 ├── PROJECT_PRESENTATION.md            ← Project document
@@ -188,27 +208,41 @@ OpenVino/
 │   └── download_benchmark_audio.py    ← Download LibriSpeech (EN) / MLS (FR) samples
 │
 ├── src/
+│   ├── logging_config.py              ← Structured JSON logging setup
 │   ├── benchmark/
 │   │   ├── base.py                    ← BaseModel, SLMBase, ASRBase, Streaming ABCs
 │   │   ├── factory.py                 ← ModelFactory — reads class from YAML, lazy import
 │   │   ├── runner.py                  ← Sync + async + live (streaming) runners
 │   │   ├── metrics.py                 ← Latency / WER / memory / TTFT / ITL helpers
 │   │   ├── repository.py              ← ResultRepository (save / list / get)
+│   │   ├── resources.py               ← System/resource probing for runs
+│   │   ├── report.py                  ← Comparison report generation
 │   │   ├── channels.py                ← PrintProgressChannel, QueueProgressChannel
 │   │   └── protocols.py               ← ProgressChannel, ModelProvider, ResultStore
 │   ├── slm/
 │   │   ├── phi3_pytorch.py            ← Phi3PyTorch(StreamingSLMBase)
 │   │   ├── phi3_openvino.py           ← Phi3OpenVINO(StreamingSLMBase)
 │   │   ├── apertus_pytorch.py         ← ApertusPyTorch(StreamingSLMBase)
-│   │   └── apertus_openvino.py        ← ApertusOpenVINO(StreamingSLMBase) — custom FX export
-│   └── asr/
-│       ├── whisper_pytorch.py         ← WhisperPyTorch(ASRBase)
-│       ├── whisper_openvino.py        ← WhisperOpenVINO(StreamingASRBase)
-│       └── languages.py               ← Whisper supported language codes
+│   │   ├── apertus_openvino.py        ← ApertusOpenVINO(StreamingSLMBase) — custom FX export
+│   │   ├── generic_pytorch.py         ← GenericSLMPyTorch — any HF causal LM (e.g. Qwen)
+│   │   └── generic_openvino.py        ← GenericSLMOpenVINO — any HF causal LM (e.g. Qwen)
+│   ├── asr/
+│   │   ├── base.py                    ← ASRBase / StreamingASRBase ABCs
+│   │   ├── whisper_pytorch.py         ← WhisperPyTorch(ASRBase)
+│   │   ├── whisper_openvino.py        ← WhisperOpenVINO(StreamingASRBase)
+│   │   └── languages.py               ← Whisper supported language codes
+│   ├── pipeline/
+│   │   └── transcribe_and_structure.py ← Voice pipeline: ASR → structured clinical JSON
+│   └── model_manager/
+│       ├── catalogue.py               ← Available-model catalogue (merged with disk status)
+│       ├── downloader.py              ← Background HF download + OpenVINO conversion
+│       ├── registry.py                ← models.yaml registry access
+│       └── disk.py                    ← Local on-disk model presence checks
 │
 ├── web/
 │   ├── server.py                      ← FastAPI app (all endpoints + SSE)
 │   ├── jobs.py                        ← In-memory job store (PENDING → RUNNING → DONE/FAILED)
+│   ├── sessions.py                    ← In-memory chat session store (multi-turn history)
 │   ├── middleware.py                  ← Request logging middleware
 │   └── static/
 │       ├── index.html                 ← HTML skeleton — mounts Vue app
@@ -220,7 +254,11 @@ OpenVino/
 │           ├── benchmark.js           ← BenchmarkStore
 │           ├── history.js             ← HistoryStore
 │           ├── compare.js             ← CompareStore
-│           └── chart.js               ← ChartStore (Chart.js)
+│           ├── chart.js               ← ChartStore (Chart.js)
+│           ├── logs.js                ← LogsStore (server log viewer, auto-refresh)
+│           ├── chat.js                ← ChatStore (multi-turn SLM chat, streaming)
+│           ├── catalogue.js           ← CatalogueStore (model download + conversion)
+│           └── transcription.js       ← TranscriptionStore (ASR sample runner)
 │
 └── requirements.txt
 ```
@@ -229,7 +267,7 @@ OpenVino/
 
 ## Technologies Used
 
-- **OpenVINO 2024.x** — Intel inference optimization toolkit
+- **OpenVINO 2026.x** — Intel inference optimization toolkit
 - **optimum-intel** — HuggingFace bridge for OpenVINO model export and inference
 - **PyTorch** — Baseline framework for comparison
 - **NNCF** — Neural Network Compression Framework (INT8/INT4 weight quantization)

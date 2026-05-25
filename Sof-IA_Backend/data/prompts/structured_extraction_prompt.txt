@@ -12,7 +12,7 @@ Rules:
 - Use null for any field not mentioned in the transcript.
 - If the transcript is empty, too short, or contains no clinical information, return ALL fields as null. Do NOT invent or hallucinate data.
 - Preserve medication names and dosages exactly as spoken.
-- The transcript may be in French, English, or Albanian — extract regardless of language.
+- The transcript may be in French or English — extract regardless of language.
 - Return only the JSON object, starting with {{ and ending with }}.
 
 Transcript:

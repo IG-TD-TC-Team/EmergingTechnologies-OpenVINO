@@ -25,6 +25,18 @@ jest.mock('../../services/EndShiftService', () => ({
   },
 }));
 
+jest.mock('../../services/queue/OfflineQueueManager', () => ({
+  __esModule: true,
+  default: {
+    retryPending: jest.fn(),
+    getQueueStats: jest.fn(),
+    getSessionStats: jest.fn(),
+    clearSession: jest.fn().mockResolvedValue(undefined),
+    configure: jest.fn(),
+    on: jest.fn(() => jest.fn()),
+  },
+}));
+
 jest.mock('../../services/SessionService', () => ({
   __esModule: true,
   default: {
@@ -52,6 +64,25 @@ jest.mock('../../services/PermissionsService', () => ({
   },
 }));
 
+jest.mock('../../services/audio/ContinuousRecordingService', () => ({
+  __esModule: true,
+  default: {
+    subscribe: jest.fn(() => jest.fn()),
+    initialize: jest.fn().mockResolvedValue(undefined),
+    isRecording: jest.fn().mockReturnValue(false),
+    getSessionId: jest.fn().mockReturnValue(null),
+    toggleRecording: jest.fn().mockResolvedValue(undefined),
+  },
+}));
+
+jest.mock('../../services/audio/WebRecorderService', () => ({
+  default: { isSupported: jest.fn().mockReturnValue(false) },
+}));
+
+jest.mock('../../services/audio/ServiceWorkerManager', () => ({
+  default: { register: jest.fn().mockResolvedValue(undefined) },
+}));
+
 jest.mock('../../repositories', () => ({
   getStorage: jest.fn().mockResolvedValue({
     queryBySession: jest.fn().mockResolvedValue([]),
@@ -64,6 +95,7 @@ jest.mock('../../repositories', () => ({
 
 import DashboardPresenter from '../../presenters/DashboardPresenter';
 import EndShiftService from '../../services/EndShiftService';
+import OfflineQueueManager from '../../services/queue/OfflineQueueManager';
 import SessionService from '../../services/SessionService';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -73,14 +105,18 @@ function makeView() {
     setAudioSource: jest.fn(),
     setMicStatus: jest.fn(),
     setRecording: jest.fn(),
+    setConnectionStatus: jest.fn(),
     setBeds: jest.fn(),
     setBedsLoading: jest.fn(),
     setConfirmVisible: jest.fn(),
     setFlushSyncing: jest.fn(),
     setOfflineGateVisible: jest.fn(),
+    setUnsyncedCount: jest.fn(),
     setCleanupProgress: jest.fn(),
     setCleanupResult: jest.fn(),
     setActivePatient: jest.fn(),
+    setBrowserSupported: jest.fn(),
+    setTranscriptionSegments: jest.fn(),
   };
 }
 
@@ -102,6 +138,9 @@ describe('DashboardPresenter — end shift flow', () => {
     presenter = new DashboardPresenter(view);
     SessionService.getActiveSessionId.mockResolvedValue('session_test_123');
     SessionService.setRecordingActive.mockResolvedValue(undefined);
+    // Default: queue is empty after retry
+    OfflineQueueManager.retryPending.mockResolvedValue(undefined);
+    OfflineQueueManager.getSessionStats.mockResolvedValue({ pendingCount: 0, failedCount: 0 });
   });
 
   // ── Step 1: button tap ────────────────────────────────────────────────────
@@ -126,13 +165,19 @@ describe('DashboardPresenter — end shift flow', () => {
 
   describe('onEndShiftConfirmed — queue empty', () => {
     beforeEach(() => {
-      EndShiftService.flushQueue.mockResolvedValue({ success: true, pendingCount: 0 });
+      // Queue drains fully
+      OfflineQueueManager.getSessionStats.mockResolvedValue({ pendingCount: 0, failedCount: 0 });
       EndShiftService.run.mockResolvedValue({ success: true, failedItems: [], durationMs: 80 });
     });
 
     it('dismisses confirm dialog', async () => {
       await presenter.onEndShiftConfirmed(navigation);
       expect(view.setConfirmVisible).toHaveBeenCalledWith(false);
+    });
+
+    it('calls retryPending() during flush', async () => {
+      await presenter.onEndShiftConfirmed(navigation);
+      expect(OfflineQueueManager.retryPending).toHaveBeenCalled();
     });
 
     it('shows then hides the syncing overlay', async () => {
@@ -167,11 +212,11 @@ describe('DashboardPresenter — end shift flow', () => {
     });
   });
 
-  // ── Step 3: confirm → flush fails (offline) ───────────────────────────────
+  // ── Step 3: confirm → chunks remain after retry ───────────────────────────
 
-  describe('onEndShiftConfirmed — offline', () => {
+  describe('onEndShiftConfirmed — chunks remain after retry', () => {
     beforeEach(() => {
-      EndShiftService.flushQueue.mockResolvedValue({ success: false, pendingCount: 2 });
+      OfflineQueueManager.getSessionStats.mockResolvedValue({ pendingCount: 2, failedCount: 1 });
     });
 
     it('shows the offline gate', async () => {
@@ -179,10 +224,34 @@ describe('DashboardPresenter — end shift flow', () => {
       expect(view.setOfflineGateVisible).toHaveBeenCalledWith(true);
     });
 
+    it('passes the total unsynced count to the view', async () => {
+      await presenter.onEndShiftConfirmed(navigation);
+      // pendingCount(2) + failedCount(1) = 3
+      expect(view.setUnsyncedCount).toHaveBeenCalledWith(3);
+    });
+
     it('does NOT start cleanup', async () => {
       await presenter.onEndShiftConfirmed(navigation);
       expect(view.setCleanupProgress).not.toHaveBeenCalled();
       expect(EndShiftService.run).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── Step 3: confirm → only failed chunks remain ───────────────────────────
+
+  describe('onEndShiftConfirmed — only failed chunks remain', () => {
+    beforeEach(() => {
+      OfflineQueueManager.getSessionStats.mockResolvedValue({ pendingCount: 0, failedCount: 2 });
+    });
+
+    it('shows the offline gate for failed chunks too', async () => {
+      await presenter.onEndShiftConfirmed(navigation);
+      expect(view.setOfflineGateVisible).toHaveBeenCalledWith(true);
+    });
+
+    it('passes failedCount as the unsynced count', async () => {
+      await presenter.onEndShiftConfirmed(navigation);
+      expect(view.setUnsyncedCount).toHaveBeenCalledWith(2);
     });
   });
 
@@ -236,19 +305,6 @@ describe('DashboardPresenter — end shift flow', () => {
         routes: [{ name: 'ModeSelection' }],
       });
     });
-
-    it('resets recording state if a recording was in progress', () => {
-      presenter._isRecording = true;
-      presenter.onSuccessDismiss(navigation);
-      expect(view.setRecording).toHaveBeenCalledWith(false);
-      expect(presenter._isRecording).toBe(false);
-    });
-
-    it('does not call setRecording when not recording', () => {
-      presenter._isRecording = false;
-      presenter.onSuccessDismiss(navigation);
-      expect(view.setRecording).not.toHaveBeenCalled();
-    });
   });
 
   // ── Step 5: error → dismiss ───────────────────────────────────────────────
@@ -291,7 +347,7 @@ describe('DashboardPresenter — end shift flow', () => {
 
   describe('full happy-path sequence', () => {
     it('walks through all state transitions in order', async () => {
-      EndShiftService.flushQueue.mockResolvedValue({ success: true, pendingCount: 0 });
+      OfflineQueueManager.getSessionStats.mockResolvedValue({ pendingCount: 0, failedCount: 0 });
       EndShiftService.run.mockResolvedValue({ success: true, failedItems: [], durationMs: 120 });
 
       // 1. Tap button
@@ -322,6 +378,32 @@ describe('DashboardPresenter — end shift flow', () => {
         index: 0,
         routes: [{ name: 'ModeSelection' }],
       });
+    });
+  });
+
+  // ── Unsynced-gate → force delete sequence ─────────────────────────────────
+
+  describe('unsynced gate → force delete sequence', () => {
+    it('shows count, then wipes on force delete', async () => {
+      OfflineQueueManager.getSessionStats.mockResolvedValue({ pendingCount: 3, failedCount: 0 });
+      EndShiftService.run.mockResolvedValue({ success: true, failedItems: [], durationMs: 90 });
+
+      // Confirm end shift
+      await presenter.onEndShiftConfirmed(navigation);
+
+      // Gate visible with correct count
+      expect(view.setOfflineGateVisible).toHaveBeenCalledWith(true);
+      expect(view.setUnsyncedCount).toHaveBeenCalledWith(3);
+      expect(EndShiftService.run).not.toHaveBeenCalled();
+
+      // Force delete
+      await presenter.onOfflineGateForceDelete(navigation);
+
+      expect(view.setOfflineGateVisible).toHaveBeenCalledWith(false);
+      expect(EndShiftService.run).toHaveBeenCalled();
+      expect(view.setCleanupResult).toHaveBeenCalledWith(
+        expect.objectContaining({ success: true })
+      );
     });
   });
 });

@@ -8,6 +8,15 @@
  * hidden or the browser is minimised, so chunks are uploaded without any
  * user interaction.
  *
+ * ─── Message protocol (SW → page) ───────────────────────────────────────────
+ * { type: 'QUEUE_RETRY' }  — received when the SW detects a failed or recovering
+ *   transcription API call. Triggers OfflineQueueManager.retryPending() here.
+ *
+ * ─── visibilitychange fallback ───────────────────────────────────────────────
+ * When the tab regains focus (nurse switches back to the app), we drain the
+ * queue immediately. This covers browsers without Background Sync or cases
+ * where the SW message was missed while the tab was hidden.
+ *
  * Graceful degradation:
  *   - No serviceWorker support  → register() returns false, requestSync() is a no-op
  *   - No BackgroundSync support → requestSync() is a no-op (ChunkUploadService
@@ -19,16 +28,21 @@
  *   isSupported() → boolean           — true when the serviceWorker API is present
  */
 
+import OfflineQueueManager from '../queue/OfflineQueueManager';
+
 const SYNC_TAG = 'upload-audio-chunks';
 const SW_PATH  = '/sw.js';
 
 const ServiceWorkerManager = {
     /** Cached ServiceWorkerRegistration returned by the last successful register(). */
     _registration: null,
+    /** True once the page-side listeners (message + visibilitychange) are wired up. */
+    _listenersAdded: false,
 
     /**
-     * Register the service worker at /sw.js with root scope.
-     * Idempotent — returns immediately if already registered.
+     * Register the service worker at /sw.js with root scope, then wire up the
+     * page-side listeners for QUEUE_RETRY messages and visibilitychange.
+     * Idempotent — safe to call multiple times.
      *
      * @returns {Promise<boolean>} true on success, false if unsupported or registration fails.
      */
@@ -38,11 +52,55 @@ const ServiceWorkerManager = {
 
         try {
             this._registration = await navigator.serviceWorker.register(SW_PATH, { scope: '/' });
+            this._setupPageListeners();
             return true;
         } catch (err) {
             console.error('[ServiceWorkerManager] Registration failed:', err);
             return false;
         }
+    },
+
+    /**
+     * Wire up:
+     *  1. navigator.serviceWorker message listener — handles QUEUE_RETRY posted by the SW.
+     *  2. document visibilitychange listener — drains queue when the nurse tabs back in.
+     *
+     * Called once from register(). Guards against double-registration with _listenersAdded.
+     */
+    _setupPageListeners() {
+        if (this._listenersAdded) return;
+        this._listenersAdded = true;
+
+        // ── SW → page message handler ─────────────────────────────────────────
+        // The SW posts { type: 'QUEUE_RETRY' } when it detects a failing or
+        // recovering transcription API call (fetch event interception) or after
+        // a background sync completes. We delegate to OfflineQueueManager which
+        // owns the backoff logic and the _draining guard.
+        navigator.serviceWorker?.addEventListener?.('message', (event) => {
+            if (event?.data?.type === 'QUEUE_RETRY') {
+                console.log('[ServiceWorkerManager] QUEUE_RETRY received from SW');
+                OfflineQueueManager.retryPending().catch((err) =>
+                    console.error('[ServiceWorkerManager] retryPending error:', err)
+                );
+            }
+        });
+
+        // ── visibilitychange fallback ─────────────────────────────────────────
+        // Triggered when the nurse switches back to the tab (or unlocks the device
+        // with the tab open). Covers browsers that don't support Background Sync
+        // or cases where the SW message was lost while the tab was hidden.
+        if (typeof document !== 'undefined') {
+            document.addEventListener?.('visibilitychange', () => {
+                if (document.visibilityState === 'visible') {
+                    console.log('[ServiceWorkerManager] Tab visible — draining queue');
+                    OfflineQueueManager.retryPending().catch((err) =>
+                        console.error('[ServiceWorkerManager] retryPending (visibility) error:', err)
+                    );
+                }
+            });
+        }
+
+        console.log('[ServiceWorkerManager] Page listeners active (message + visibilitychange)');
     },
 
     /**

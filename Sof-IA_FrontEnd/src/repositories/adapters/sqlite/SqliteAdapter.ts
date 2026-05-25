@@ -156,6 +156,15 @@ export class SqliteAdapter implements IRepository {
     return results.map((r) => this.deserializeRecord(r)) as T[];
   }
 
+  async queryBySessionAndBed<T>(store: string, sessionId: string, bedId: string): Promise<T[]> {
+    await this.ensureInitialized();
+
+    const query = `SELECT * FROM ${store} WHERE session_id = ? AND bed_id = ? ORDER BY created_at DESC`;
+    const results = await this.db.getAllAsync<any>(query, [sessionId, bedId]);
+
+    return results.map((r) => this.deserializeRecord(r)) as T[];
+  }
+
   async findByField<T>(store: string, field: string, value: any): Promise<T[]> {
     await this.ensureInitialized();
 
@@ -193,6 +202,14 @@ export class SqliteAdapter implements IRepository {
       'audio_recordings',
       'transcriptions',
       'clinical_notes',
+      'recording_queue',
+      'audio_blobs',
+      'transcription_segments',
+      // Card stores (US22)
+      'medications',
+      'vital_signs',
+      'allergies',
+      'safety_info',
     ];
 
     for (const store of stores) {
@@ -337,7 +354,7 @@ export class SqliteAdapter implements IRepository {
     const record: any = {};
 
     for (const [key, value] of Object.entries(row)) {
-      const camelKey = this.toCamelCase(key);
+      const camelKey = key; // keep snake_case to match TypeScript models and Dexie behavior
 
       // Boolean from integer
       if (typeof value === 'number' && (value === 0 || value === 1)) {

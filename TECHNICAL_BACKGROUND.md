@@ -234,11 +234,11 @@ Including Phi-3 alongside 7-8B models serves two purposes:
 
 ---
 
-## CLI Script Reference
+## Exploring the Side Quests
 
-Whisper and Phi-3 are the **core benchmarked models** in this project. Beyond the web dashboard, standalone CLI scripts let you run conversions, transcriptions, and comparisons directly from the command line.
+While the main focus of this project is benchmarking and implementing a clinical voice-to-text pipeline on CPU, the Whisper and Phi-3 implementations serve as **side quests** — additional experiments demonstrating the versatility of the OpenVINO pipeline across different model architectures.
 
-The Apertus 8B OpenVINO export was the novel engineering challenge — no prior conversion guide existed for that architecture. The `torch.export` + KV-cache wrapper approach (Path B in the export pipeline section) was developed specifically for it and is now complete.
+These are **not part of the core benchmark suite** but are fully functional implementations you can explore independently.
 
 ### Quick Start: Whisper ASR
 
@@ -339,3 +339,144 @@ Key concepts:
 | **Inference memory (MB)** | RSS delta during `model.run()` | Near zero for OpenVINO (weights already loaded) |
 | **WER (%)** | Word Error Rate = `(substitutions + deletions + insertions) / reference_words` | ASR accuracy; lower is better |
 | **RTF** | Real-Time Factor = transcription latency / audio duration | < 1.0 means faster than real-time |
+
+---
+
+## FastAPI & Uvicorn
+
+**FastAPI** is a Python web framework built on top of Starlette and Pydantic. It is used as the backend server for the voice pipeline API.
+
+Key properties relevant to this project:
+
+- **Async-first** — endpoint handlers are `async def`, so I/O (network, file reads) never blocks the event loop. CPU-bound inference is offloaded to a thread pool via `loop.run_in_executor()`.
+- **Lifespan hooks** — the `@asynccontextmanager` lifespan pattern runs startup and shutdown code once, used here to pre-load the OpenVINO models before the first request arrives.
+- **Automatic serialization** — `JSONResponse` handles dict → JSON. `UploadFile` and `Form` handle multipart audio uploads without extra libraries (provided `python-multipart` is installed).
+
+**Uvicorn** is an ASGI server that runs the FastAPI application. It handles the HTTP/1.1 layer, keeps the async event loop alive, and routes requests to the FastAPI middleware stack.
+
+Single-worker mode (`--workers 1`) is used intentionally: OpenVINO models are loaded once into memory at startup. Multiple workers would each load their own copy, multiplying RAM usage.
+
+---
+
+## Model-View-Presenter (MVP) Pattern
+
+MVP is an architectural pattern that separates a UI component into three roles:
+
+- **Model** — the data layer (repositories, services, local DB). It has no knowledge of the UI.
+- **View** — the React component. It only holds UI state, renders it, and forwards user actions to the presenter. It contains no business logic.
+- **Presenter** — the coordinator. It holds business logic, calls services/repositories, and pushes new state back to the view through a narrow interface (a plain object of setter callbacks).
+
+```
+User taps mic button
+    └─> View calls presenter.onMicPress()
+            └─> Presenter starts audio recorder
+            └─> Presenter calls TranscriptionService.processChunk()
+            └─> Presenter calls view.setRecording(true)
+                    └─> View re-renders with recording indicator
+```
+
+**Why MVP over direct state management (Redux, Zustand, etc.)?**
+
+- **Testability** — presenters are plain JavaScript classes with no React dependency. Tests instantiate a presenter with a mock view object and assert which setters were called, without mounting any components.
+- **Separation of concerns** — screens stay thin. New screens can reuse the same presenter.
+- **No global store** — in a single-user, single-session mobile app, global state management adds overhead without benefit. Presenter state is local to the screen it serves.
+
+In the codebase, every screen file has a matching presenter:
+
+| Screen | Presenter | Responsibility |
+|--------|-----------|---------------|
+| `DashboardScreen` | `DashboardPresenter` | Recording, bed selection, end-shift flow, sync status |
+| `CardDetailScreen` | `CardDetailPresenter` | Load card data for a specific bed and card type |
+| `LoadingScreen` | `LoadingPresenter` | DB init, session resume check |
+| `ModeSelectionScreen` | `ModeSelectionPresenter` | Audio source selection and capabilities check |
+
+---
+
+## React Native & Expo
+
+**React Native** lets you write mobile applications in JavaScript/TypeScript using React. Instead of HTML elements, it uses platform-specific components (`View`, `Text`, `Pressable`) that map to native iOS and Android widgets at runtime.
+
+**Expo** is a toolchain built on top of React Native that:
+- Eliminates the need to install Xcode or Android Studio for most development tasks
+- Provides pre-built native APIs (`expo-av` for audio, `expo-file-system` for file I/O, `expo-sqlite` for local databases)
+- Runs the app on a physical device via the **Expo Go** app by scanning a QR code
+- Supports web output (`npm run web`) using `react-native-web`, which maps RN components to DOM elements
+
+The Sof-IA frontend targets **Android** (primary) and **Chrome/Web** (fallback). The web build is used for development and demonstration; the Android build is the clinical target.
+
+---
+
+## Audio Encoding: WebM/Opus and M4A/AAC
+
+The format of recorded audio chunks depends on the platform:
+
+| Platform | Container | Codec | Bitrate | Typical chunk size (30s) |
+|----------|-----------|-------|---------|--------------------------|
+| Web (Chrome) | WebM | Opus | ~128 kbps | ~480 KB |
+| Android | M4A | AAC | ~128 kbps | ~480 KB |
+
+**Opus** is a low-latency, high-quality codec designed for real-time audio. It is the only codec mandated by the WebRTC standard and is the default output of the browser's `MediaRecorder` API. It handles speech particularly well at low bitrates.
+
+**AAC (Advanced Audio Coding)** is the standard codec for M4A containers on Android and iOS. It is what `expo-av` produces by default on Android.
+
+Both formats are decoded on the backend by **pydub**, which delegates to **ffmpeg** for the actual decode. After decoding, the audio is normalized to a float32 mono array at 16 kHz — the input format Whisper expects regardless of the original format.
+
+---
+
+## IndexedDB & Dexie.js
+
+**IndexedDB** is a browser-native key-value object store with support for indexes and transactions. It is the only viable option for persistent structured storage in a web app — `localStorage` is limited to ~5 MB and is synchronous.
+
+**Dexie.js** is a thin, promise-based wrapper around the raw IndexedDB API that makes it usable without callback pyramids. In Sof-IA:
+
+- The main app database (`sofia_db`) stores sessions, audio recordings, transcription segments, and clinical card data (medications, vitals, allergies, safety info)
+- The queue database (`sofia_queue`) stores the offline retry queue as a separate Dexie database to isolate queue migrations from the main schema
+
+Dexie's compound indexes (`[status+timestamp]`) make FIFO queue dequeue a single indexed scan rather than a full table scan, which matters when chunks accumulate during extended offline periods.
+
+On **Android**, `expo-sqlite` is used instead of IndexedDB. The same repository interface (`IStorageRepository`) abstracts the difference — presenters and services never reference the storage adapter directly.
+
+---
+
+## Session TTL & Transient Data Model
+
+Sof-IA is designed as a **transient data store**, not a persistent medical record system. All data produced during a shift has an explicit expiry timestamp so that patient information never lingers on a device longer than a single shift.
+
+### TTL assignment
+
+When a chunk is processed, the frontend calculates an expiry time once and stamps it on every derived row:
+
+```js
+const expiresAt = new Date(
+  new Date(session.started_at).getTime() + 14 * 60 * 60 * 1000
+).toISOString();  // session start + 14 hours
+```
+
+Every row in every card table (`transcription_segments`, `medications`, `vital_signs`, `allergies`, `safety_info`) carries this same `expires_at` value.
+
+### Why 14 hours?
+
+A nursing shift is typically 8–12 hours. 14 hours gives enough margin for overtime or a delayed handover without leaving data on the device indefinitely.
+
+### Enforcement
+
+TTL enforcement happens at two points:
+
+1. **End Shift** — the nurse explicitly triggers a full wipe of all session data. This is the primary cleanup path.
+2. **App startup** — `LoadingPresenter` checks whether an existing session has exceeded its TTL. If it has, the expired session is cleaned up before the nurse is prompted to start a new one.
+
+This two-layer approach ensures data is removed even if the nurse never taps "End shift" (e.g., app crash, lost device).
+
+---
+
+## Offline Queue Pattern
+
+The offline queue ensures no audio is lost if the backend is temporarily unreachable (Wi-Fi dropout, server restart). The pattern has three components:
+
+**Enqueue on failure** — if `TranscriptionService.processChunk()` receives a non-200 response or a network error, it calls `OfflineQueueManager.enqueue(chunkRef, sessionId)`. The audio blob is already persisted in local storage; only a reference is queued.
+
+**Retry on reconnect** — `NetworkMonitor` listens to browser online/offline events. On the offline→online transition it calls `OfflineQueueManager.retryPending()`, which drains the queue in FIFO order with exponential backoff (0 s → 5 s → 10 s → 30 s, max 3 retries).
+
+**Stale entry cleanup** — because audio blobs are held in the browser's origin storage and are cleared on page reload or shift end, queue entries from previous sessions point to blobs that no longer exist. On app startup, all `pending` entries in `sofia_queue` are marked `failed` immediately to prevent the UI from showing a perpetual syncing indicator.
+
+The `SyncStatusIndicator` component reads live queue stats via `OfflineQueueManager.getQueueStats()` and shows one of four states: idle (hidden), offline (orange — buffering), syncing (green spinner — uploading), or failed (red — needs attention).

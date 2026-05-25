@@ -12,42 +12,7 @@ This guide shows you how to run performance benchmarks comparing **PyTorch CPU**
 
 ## Quick Start
 
-### Prerequisites Setup
-
-**1. Install Python 3.12**
-
-Download from [python.org](https://www.python.org/downloads/) or use a package manager:
-
-```powershell
-# Verify installation
-python --version  # Should show Python 3.12.x
-```
-
-> **Important:** Python 3.13+ is not supported due to `optimum` compatibility issues
-
-**2. Create and activate virtual environment**
-
-```powershell
-# Navigate to project directory
-
-# Create virtual environment
-python -m venv .venv
-
-# Activate virtual environment
-.\.venv\Scripts\activate
-
-# You should see (.venv) in your command prompt
-```
-
-**3. Install dependencies**
-
-```powershell
-# Install all required packages
-pip install -r requirements.txt
-
-# This installs: OpenVINO, PyTorch, Transformers, FastAPI, etc.
-# Expected time: ~5-10 minutes
-```
+> **Prerequisites and first-time setup** (Python 3.12, venv, `pip install`, model conversion) are covered in the backend section of the [README](./README.md). Complete those steps first, then return here.
 
 ---
 
@@ -57,9 +22,7 @@ Before benchmarking, you need to convert the models from PyTorch to OpenVINO for
 
 **Why convert?** PyTorch models are designed for training and general-purpose inference. OpenVINO converts them into an optimized Intermediate Representation (IR) format that applies INT8 quantization, operator fusion, and Intel CPU-specific optimizations. This is what enables the 3-5× speedup we're testing.
 
-> **You can do this through the web interface instead** — see the [Models tab](#models-tab--model-catalogue) section below. The web UI downloads and converts in one click, with a live progress log.
-
-### Convert Phi-3 Mini (command line)
+### Convert Phi-3 Mini
 
 ```powershell
 python scripts/convert_phi3.py
@@ -69,7 +32,7 @@ python scripts/convert_phi3.py
 
 **Expected time:** ~5-10 minutes (first run only)
 
-### Convert Whisper (command line)
+### Convert Whisper
 
 ```powershell
 python scripts/convert_whisper.py --model medium
@@ -305,7 +268,7 @@ Lets you run a single ASR transcription against a curated benchmark sample and i
 3. Select a **Sample** from the grouped dropdown. Samples are organized by language:
    - *English — LibriSpeech*: English audiobook recordings
    - *French — MLS*: French audiobook recordings
-   
+
    The dropdown shows the audio duration and a truncated preview of the reference transcript for each sample.
 
 **Running a transcription:**
@@ -435,7 +398,6 @@ python scripts/run_benchmark.py --model whisper_pytorch --audio data/benchmark/a
 # OpenVINO optimized
 python scripts/run_benchmark.py --model whisper_openvino --audio data/benchmark/asr_audio.wav --reference "REFERENCE_TRANSCRIPT_HERE" --warmup 2 --timed 5
 ```
-
 ### Understanding Warmup vs Timed Runs
 
 Every benchmark runs in two phases:
@@ -589,26 +551,19 @@ python scripts/download_benchmark_audio.py --lang en --samples 5
 
 ## Command Reference
 
+> **First-time setup** (venv creation, dependency install, model conversion) is covered in the [README](./README.md). The commands below assume the environment is already active and models are already converted.
+
 ### Quick Commands Summary
 
 ```powershell
-# 0. Setup (first time only)
-python -m venv .venv
-.\.venv\Scripts\activate
-pip install -r requirements.txt
-
-# 1. Convert models (once) — or use the web dashboard Models tab
-python scripts/convert_phi3.py
-python scripts/convert_whisper.py --model medium
-
-# 2. Prepare data (once)
+# Prepare benchmark data (once)
 python scripts/setup_benchmark_data.py
 python scripts/download_benchmark_audio.py --lang en --samples 5
 
-# 3. Run benchmarks (repeatable)
+# Run all benchmarks
 python scripts/run_all_benchmarks.py --warmup 2 --timed 5
 
-# 4. Start web dashboard (all-in-one alternative for steps 1-3)
+# Or start the web dashboard
 uvicorn web.server:app --reload --port 8000
 # Then open http://localhost:8000
 ```

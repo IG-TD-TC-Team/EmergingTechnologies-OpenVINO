@@ -1,6 +1,6 @@
 # Technical Background
 
-This document covers the theoretical foundations behind the project — useful for understanding why each design decision was made. Familiarity with these concepts is not required to run the benchmarks, but it helps interpret the results.
+This document covers the theoretical foundations behind the project — useful for understanding why each design decision was made.
 
 ---
 

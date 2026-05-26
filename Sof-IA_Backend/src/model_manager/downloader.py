@@ -10,7 +10,10 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from src.benchmark.resources import sdpa_no_vmap
+
 logger = logging.getLogger(__name__)
+
 
 _MODELS_ROOT = Path(__file__).resolve().parents[2] / "models"
 
@@ -137,6 +140,11 @@ def _convert_asr(hub_id: str, output_path: Path, channel) -> None:
     from transformers import AutoProcessor
 
     channel.send_progress(f"Downloading and converting ASR model from '{hub_id}'...")
+    # Export as stateful (optimum-intel default).  Do NOT pass stateful=False:
+    # stateless seq2seq exports are broken in OV 2026.x (Reshape shape mismatch
+    # on the multi-token forced-prefix prefill step).  The detect_language()
+    # attn-mask bug (the other OV 2026.x issue) is fixed by always passing
+    # language= to generate() in WhisperOpenVINO.transcribe().
     model = OVModelForSpeechSeq2Seq.from_pretrained(hub_id, export=True, compile=False)
     channel.send_progress("Saving OpenVINO IR files...")
     model.save_pretrained(str(output_path))
@@ -163,6 +171,11 @@ def _patch_gemma3_multimodal_list() -> None:
         pass
 
 
+# Sentinel phrase emitted by optimum-intel when a model type has no registered
+# OnnxConfig (e.g. Apertus, which is a custom Mistral-family architecture).
+_UNSUPPORTED_ARCH_PHRASE = "custom or unsupported architecture"
+
+
 def _convert_slm(hub_id: str, output_path: Path, compression: str, channel) -> None:
     _patch_gemma3_multimodal_list()
     if compression == "int4":
@@ -176,12 +189,33 @@ def _convert_slm_int8(hub_id: str, output_path: Path, channel) -> None:
 
     channel.send_progress(f"Downloading '{hub_id}' and exporting to OpenVINO INT8...")
     channel.send_progress("This may take 5-15 minutes depending on model size.")
-    main_export(
-        model_name_or_path=hub_id,
-        output=str(output_path),
-        task="text-generation-with-past",
-        library_name="transformers",
-    )
+    try:
+        # Two-layer defence against the torch.vmap-in-jit.trace crash
+        # (transformers >= 4.50 uses vmap in sdpa_mask_recent_torch).
+        # Layer 1: _attn_implementation="eager" — primary fix, prevents
+        #   create_causal_mask from ever selecting the vmap path.
+        # Layer 2: sdpa_no_vmap() — defence-in-depth for models that
+        #   override _attn_implementation at layer level.
+        with sdpa_no_vmap():
+            main_export(
+                model_name_or_path=hub_id,
+                output=str(output_path),
+                task="text-generation-with-past",
+                library_name="transformers",
+                model_loading_kwargs={
+                    "_attn_implementation": "eager",
+                    "torch_dtype": "auto",
+                },
+            )
+    except Exception as exc:
+        if _UNSUPPORTED_ARCH_PHRASE in str(exc):
+            channel.send_progress(
+                f"'{hub_id}' uses a custom architecture not supported by the generic "
+                "exporter — switching to multi-tier custom export strategy."
+            )
+            _convert_custom_arch(hub_id, output_path, channel)
+            return
+        raise
     channel.send_progress("INT8 export complete.")
 
 
@@ -201,18 +235,29 @@ def _convert_slm_int4(hub_id: str, output_path: Path, channel) -> None:
         return
 
     try:
-        model = OVModelForCausalLM.from_pretrained(
-            hub_id,
-            export=True,
-            quantization_config=quant_config,
-        )
+        # Patch sdpa_mask_recent_torch with a vmap-free broadcasting version
+        # before export.  Same vmap incompatibility applies to INT4 path.
+        with sdpa_no_vmap():
+            model = OVModelForCausalLM.from_pretrained(
+                hub_id,
+                export=True,
+                quantization_config=quant_config,
+            )
     except Exception as exc:
-        if "stoll argument out of range" in str(exc) or "frontends/common" in str(exc).replace("\\", "/"):
+        exc_str = str(exc)
+        if "stoll argument out of range" in exc_str or "frontends/common" in exc_str.replace("\\", "/"):
             channel.send_progress(
                 "INT4 export hit an OpenVINO integer-overflow bug for this architecture — "
                 "falling back to INT8."
             )
             _convert_slm_int8(hub_id, output_path, channel)
+            return
+        if _UNSUPPORTED_ARCH_PHRASE in exc_str:
+            channel.send_progress(
+                f"'{hub_id}' uses a custom architecture not supported by the generic "
+                "exporter — switching to multi-tier custom export strategy (INT4)."
+            )
+            _convert_custom_arch(hub_id, output_path, channel)
             return
         raise
     channel.send_progress("Saving OpenVINO INT4 IR files...")
@@ -224,6 +269,28 @@ def _convert_slm_int4(hub_id: str, output_path: Path, channel) -> None:
     tokenizer.save_pretrained(str(output_path))
 
     channel.send_progress("INT4 export complete.")
+
+
+def _convert_custom_arch(hub_id: str, output_path: Path, channel) -> None:
+    """Export a custom/unsupported architecture using ApertusOpenVINO's 3-tier strategy.
+
+    When the generic optimum-intel exporter raises "custom or unsupported architecture",
+    this function delegates to ApertusOpenVINO._export(), which tries:
+      Tier 1 — optimum-intel + Mistral OnnxConfig + vmap patch (INT4 via NNCF)
+      Tier 2 — FX-based KV-cache export (torch.export + ov.convert_model + NNCF INT4)
+    All tiers use INT4 weight compression (same as the benchmark screen path).
+    """
+    # Import here to avoid circular dependency at module load time.
+    from src.slm.apertus_openvino import ApertusOpenVINO
+
+    exporter = ApertusOpenVINO(
+        model_id=hub_id.replace("/", "_"),
+        model_path=str(output_path),
+        hub_id=hub_id,
+        channel=channel,
+    )
+    exporter._export(output_path)
+    channel.send_progress("Custom-architecture export complete.")
 
 
 def _friendly_error(exc: Exception, hub_id: str) -> str:

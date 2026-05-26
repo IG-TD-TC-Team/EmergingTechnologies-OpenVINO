@@ -46,6 +46,18 @@ createApp({
     /** @type {CatalogueStore} */
     const catalogueStore = new CatalogueStore();
 
+    // When a catalogue download finishes successfully, re-fetch /api/models so
+    // the new model appears immediately in the Benchmark and Chat dropdowns
+    // without requiring a manual page reload.
+    catalogueStore.onDownloadComplete = async () => {
+      await modelStore.init();
+      // If the benchmark form has no selected model yet, pick the first ready one.
+      if (!benchmark.run.value.modelId) {
+        const first = readyModels.value.find(m => m.enabled);
+        if (first) benchmark.run.value.modelId = first.id;
+      }
+    };
+
     /**
      * Currently active right-panel tab.
      * @type {Ref} One of `"results"`, `"compare"`, `"chart"`, or `"logs"`.
@@ -59,19 +71,28 @@ createApp({
     const mode = ref('benchmark');
 
     /**
-     * SLM models available for the chat interface (enabled SLMs only).
+     * All models that have their files on disk (or use a Hub ID that downloads
+     * on demand).  Used to populate the Benchmark model dropdown.
      * @type {ComputedRef<ModelMeta[]>}
      */
-    const slmModels = computed(() =>
-      modelStore.models.value.filter(m => m.type === 'slm' && m.enabled)
+    const readyModels = computed(() =>
+      modelStore.models.value.filter(m => m.enabled && m.ready)
     );
 
     /**
-     * ASR models available for the transcription tab (enabled ASRs only).
+     * SLM models available for the chat interface — enabled AND on disk.
+     * @type {ComputedRef<ModelMeta[]>}
+     */
+    const slmModels = computed(() =>
+      modelStore.models.value.filter(m => m.type === 'slm' && m.enabled && m.ready)
+    );
+
+    /**
+     * ASR models available for the transcription tab — enabled AND on disk.
      * @type {ComputedRef<ModelMeta[]>}
      */
     const asrModels = computed(() =>
-      modelStore.models.value.filter(m => m.type === 'asr' && m.enabled)
+      modelStore.models.value.filter(m => m.type === 'asr' && m.enabled && m.ready)
     );
 
     /** @type {ChatStore} — instantiated after slmModels is defined */
@@ -253,7 +274,8 @@ createApp({
      */
     onMounted(async () => {
       await Promise.all([modelStore.init(), histStore.fetchHistory(), catalogueStore.fetch()]);
-      const first = modelStore.models.value.find(m => m.enabled);
+      // Pre-select the first ready model so the form is usable immediately.
+      const first = readyModels.value.find(m => m.enabled);
       if (first) benchmark.run.value.modelId = first.id;
     });
 
@@ -281,6 +303,7 @@ createApp({
 
       // --- modelStore ---
       models:             modelStore.models,
+      readyModels,
       standardInputs:     modelStore.standardInputs,
       audioSamples:       modelStore.audioSamples,
       audioSamplesByLang: modelStore.audioSamplesByLang,

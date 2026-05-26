@@ -114,6 +114,8 @@ class ApertusPyTorch(StreamingSLMBase):
         outputs = self._model.generate(
             **inputs, max_new_tokens=self.max_new_tokens, do_sample=False,
             repetition_penalty=1.1,
+            eos_token_id=self._tokenizer.eos_token_id,   # stop at <|assistant_end|>
+            pad_token_id=self._tokenizer.eos_token_id,
         )
         n_new_tokens = outputs.shape[-1] - n_input_tokens
         text = self._tokenizer.decode(
@@ -133,6 +135,8 @@ class ApertusPyTorch(StreamingSLMBase):
             "do_sample": False,
             "repetition_penalty": 1.1,
             "streamer": streamer,
+            "eos_token_id": self._tokenizer.eos_token_id,   # stop at <|assistant_end|>
+            "pad_token_id": self._tokenizer.eos_token_id,
         }
         thread = threading.Thread(target=self._model.generate, kwargs=gen_kwargs)
         thread.start()

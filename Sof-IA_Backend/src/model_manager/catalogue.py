@@ -15,7 +15,8 @@ size_gb             Approximate total size on disk after conversion (GB).
 default_compression Default quantization format: "int8" or "int4".
 compression_options List of supported options the user can choose from.
 max_new_tokens      Maximum generation tokens (None for ASR).
-chat_format         Chat template key ("phi3", "llama3", or None for ASR).
+chat_format         Chat template key ("phi3", "llama3", "qwen", "apertus",
+                    "gemma", or None for ASR).
 notes               One-line description shown in the UI card.
 """
 
@@ -130,7 +131,7 @@ CATALOGUE: list[dict] = [
         "default_compression": "int4",
         "compression_options": ["int4"],
         "max_new_tokens": 512,
-        "chat_format": "llama3",
+        "chat_format": "apertus",
         "notes": "French-optimised 8B model — already on disk",
     },
     # ------------------------------------------------------------------
@@ -175,7 +176,7 @@ CATALOGUE: list[dict] = [
         "default_compression": "int8",
         "compression_options": ["int8"],
         "max_new_tokens": 512,
-        "chat_format": "llama3",
+        "chat_format": "qwen",
         "notes": "Very small and fast multilingual model",
     },
     {
@@ -188,7 +189,7 @@ CATALOGUE: list[dict] = [
         "default_compression": "int8",
         "compression_options": ["int8"],
         "max_new_tokens": 512,
-        "chat_format": "llama3",
+        "chat_format": "qwen",
         "notes": "Multilingual 3B — strong French capability",
     },
     {
@@ -201,7 +202,7 @@ CATALOGUE: list[dict] = [
         "default_compression": "int4",
         "compression_options": ["int4", "int8"],
         "max_new_tokens": 512,
-        "chat_format": "llama3",
+        "chat_format": "qwen",
         "notes": "Multilingual 7B — best quality in this family",
     },
 ]

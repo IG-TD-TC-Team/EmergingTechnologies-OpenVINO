@@ -66,6 +66,16 @@ class CatalogueStore {
 
     /** @type {EventSource|null} */
     this._es = null;
+
+    /**
+     * Optional callback invoked (with no arguments) when a download job
+     * completes successfully.  Set by `app.js` to trigger a model-list
+     * refresh so newly downloaded models appear in the Benchmark and Chat
+     * dropdowns without requiring a manual page reload.
+     *
+     * @type {Function|null}
+     */
+    this.onDownloadComplete = null;
   }
 
   /** Fetch the catalogue from the server and populate this.entries. */
@@ -161,6 +171,9 @@ class CatalogueStore {
         this._es = null;
         this.activeJobId.value = null;
         this.activeEntryId.value = null;
+        // Notify app.js to refresh the model list so the new model appears
+        // in the Benchmark and Chat dropdowns without a manual page reload.
+        if (this.onDownloadComplete) this.onDownloadComplete();
       } else if (event.type === 'error') {
         const raw = event.message || '';
         this.jobIsGated.value = raw.startsWith('GATED_MODEL:') || /gated|401|restricted/i.test(raw);

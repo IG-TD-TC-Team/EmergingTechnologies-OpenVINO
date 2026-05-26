@@ -164,19 +164,54 @@ def serve_index():
 # Routes — config
 # ---------------------------------------------------------------------------
 
+def _is_model_ready(model_cfg: dict, repo_root: Path) -> bool:
+    """Return True if the model's required files are present on disk.
+
+    Models whose ``model_path`` is a HuggingFace Hub ID (not a local
+    ``models/…`` path) are always considered ready — they download on demand.
+
+    Local paths are checked for their type-specific marker file:
+    - OpenVINO SLM     → ``openvino_model.xml``
+    - OpenVINO ASR     → ``openvino_encoder_model.xml``
+    - PyTorch (local)  → ``config.json``
+    """
+    model_path_str = model_cfg.get("model_path", "")
+    # Hub IDs look like "openai/whisper-medium" — no leading "models/" segment
+    if not model_path_str.startswith("models/"):
+        return True  # downloads on-demand from Hub
+
+    model_path = repo_root / model_path_str
+    if not model_path.exists():
+        return False
+
+    model_class = model_cfg.get("class", "")
+    model_type  = model_cfg.get("type", "")
+
+    if model_type == "asr" and "openvino" in model_class.lower():
+        return (model_path / "openvino_encoder_model.xml").exists()
+    if "openvino" in model_class.lower():
+        return (model_path / "openvino_model.xml").exists()
+    # PyTorch local paths — presence of config.json is sufficient
+    return (model_path / "config.json").exists()
+
+
 @app.get("/api/models")
 def list_models():
-    """Return all models from config with their type, label, and enabled state.
+    """Return all models from config with their type, label, enabled and ready state.
 
+    ``ready`` is ``true`` only when the model's files are actually present on
+    disk (or the model_path is a HuggingFace Hub ID that downloads on demand).
     Reads fresh from disk so newly downloaded models appear without a restart.
     """
     cfg = _load_yaml_config()
+    repo_root = _CONFIG_PATH.parent.parent
     models = [
         {
             "id": mid,
             "label": mcfg.get("label", mid),
             "type": mcfg.get("type", "unknown"),
             "enabled": mcfg.get("enabled", True),
+            "ready": _is_model_ready(mcfg, repo_root),
         }
         for mid, mcfg in cfg.get("models", {}).items()
     ]
@@ -689,6 +724,57 @@ def _format_gemma_chat(system_prompt: str, messages: list[dict]) -> str:
     return "".join(parts)
 
 
+def _format_qwen_chat(system_prompt: str, messages: list[dict]) -> str:
+    """Format a conversation using the ChatML template (Qwen 2.5 Instruct).
+
+    Qwen 2.5 Instruct and most ChatML-based models use these control tokens:
+        <|im_start|>system\\n{system}<|im_end|>\\n
+        <|im_start|>user\\n{content}<|im_end|>\\n
+        <|im_start|>assistant\\n
+
+    This is NOT the same as Llama-3 format.  Using Llama-3 tokens
+    (<|start_header_id|> etc.) for Qwen produces out-of-vocabulary sequences
+    that the model never saw during training.
+    """
+    parts = [f"<|im_start|>system\n{system_prompt}<|im_end|>\n"]
+    for msg in messages:
+        role = msg["role"]
+        content = msg["content"]
+        if role == "user":
+            parts.append(f"<|im_start|>user\n{content}<|im_end|>\n")
+        elif role == "assistant":
+            parts.append(f"<|im_start|>assistant\n{content}<|im_end|>\n")
+    parts.append("<|im_start|>assistant\n")
+    return "".join(parts)
+
+
+def _format_apertus_chat(system_prompt: str, messages: list[dict]) -> str:
+    """Format a conversation using the Apertus Instruct chat template.
+
+    Apertus (swiss-ai/Apertus-8B-Instruct-*) defines its own special tokens
+    (confirmed from tokenizer_config.json added_tokens_decoder):
+        <|system_start|>  / <|system_end|>
+        <|user_start|>    / <|user_end|>
+        <|assistant_start|> / <|assistant_end|>   ← also the EOS token (ID 68)
+
+    These are NOT Llama-3 tokens. Using Llama-3 format (<|start_header_id|>
+    etc.) produces tokens that Apertus never saw during training, so the model
+    ignores all instruction structure and hallucinates free-form text.
+    """
+    parts = ["<s>"]
+    if system_prompt:
+        parts.append(f"<|system_start|>{system_prompt}<|system_end|>")
+    for msg in messages:
+        role = msg["role"]
+        content = msg["content"]
+        if role == "user":
+            parts.append(f"<|user_start|>{content}<|user_end|>")
+        elif role == "assistant":
+            parts.append(f"<|assistant_start|>{content}<|assistant_end|>")
+    parts.append("<|assistant_start|>")
+    return "".join(parts)
+
+
 def _format_chat(model_id: str, system_prompt: str, messages: list[dict], cfg: dict) -> str:
     """Dispatch to the correct chat template based on ``chat_format`` in models.yaml.
 
@@ -696,6 +782,10 @@ def _format_chat(model_id: str, system_prompt: str, messages: list[dict], cfg: d
     preserving backward compatibility with existing model entries.
     """
     chat_format = cfg.get("models", {}).get(model_id, {}).get("chat_format", "phi3")
+    if chat_format == "apertus":
+        return _format_apertus_chat(system_prompt, messages)
+    if chat_format == "qwen":
+        return _format_qwen_chat(system_prompt, messages)
     if chat_format == "llama3":
         return _format_llama3_chat(system_prompt, messages)
     if chat_format == "gemma":

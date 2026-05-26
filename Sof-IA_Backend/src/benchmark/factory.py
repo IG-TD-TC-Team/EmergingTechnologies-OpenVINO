@@ -141,6 +141,8 @@ class ModelFactory:
                 kwargs["max_new_tokens"] = model_cfg["max_new_tokens"]
             if model_cfg.get("hub_id"):
                 kwargs["hub_id"] = model_cfg["hub_id"]
+            if model_cfg.get("compression"):
+                kwargs["compression"] = model_cfg["compression"]
         elif model_type == "asr":
             # ASR constructors do not accept max_new_tokens (LSP fix)
             if model_cfg.get("hub_id"):

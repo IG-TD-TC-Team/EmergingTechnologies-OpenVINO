@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import os
+from contextlib import contextmanager
 
 import psutil
 
@@ -169,6 +170,89 @@ def patch_nncf_compat() -> None:
                 _log.warning_once = _make_wrapper(_wonce)
     except Exception:
         pass
+
+
+@contextmanager
+def sdpa_no_vmap():
+    """Context manager: replace ``sdpa_mask_recent_torch`` with a vmap-free version.
+
+    ``transformers >= 4.50`` calls ``torch.vmap`` inside
+    ``sdpa_mask_recent_torch`` (via ``_vmap_for_bhqkv``).  The optimum-intel
+    ONNX exporter uses ``torch.jit.trace`` to capture the model graph;
+    ``torch.vmap`` higher-order functions cannot be traced, causing::
+
+        RuntimeError: vmap: calling torch.vmap inside torch.jit.trace is not
+        supported.
+
+    This context manager patches the live function reference with a
+    broadcasting-only replacement that is TorchScript-compatible, then
+    restores the original on exit.
+
+    Use this around every ``main_export`` / ``OVModelForCausalLM.from_pretrained
+    (export=True)`` call so models using the new masking API
+    (Qwen 2.5, LLaMA 3.2, Apertus …) convert cleanly.
+    """
+    try:
+        import torch
+        import transformers.masking_utils as _mu
+    except ImportError:
+        yield
+        return
+
+    def _no_vmap(
+        batch_size: int,
+        cache_position: "torch.Tensor",
+        kv_length: int,
+        kv_offset: int = 0,
+        mask_function=None,
+        attention_mask=None,
+        local_size=None,
+        allow_is_causal_skip: bool = True,
+        **kwargs,
+    ):
+        if mask_function is None:
+            mask_function = _mu.causal_mask_function
+
+        q_length = cache_position.shape[0]
+        padding_mask = _mu.prepare_padding_mask(
+            attention_mask, kv_length, kv_offset, _slice=False
+        )
+
+        if allow_is_causal_skip and _mu._ignore_causal_mask_sdpa(
+            padding_mask, q_length, kv_length, kv_offset, local_size
+        ):
+            return None
+
+        kv_arange = torch.arange(kv_length, device=cache_position.device) + kv_offset
+
+        if padding_mask is not None:
+            mask_function = _mu.and_masks(
+                mask_function, _mu.padding_mask_function(padding_mask)
+            )
+
+        # Vectorise over (q, kv) via broadcasting — equivalent to
+        # _vmap_for_bhqkv but without torch.vmap (which jit.trace cannot capture).
+        q_idx = cache_position.view(-1, 1)  # [q_len, 1]
+        k_idx = kv_arange.view(1, -1)       # [1, kv_len]
+        masks = []
+        for b in range(batch_size):
+            mask_2d = mask_function(b, 0, q_idx, k_idx)  # [q_len, kv_len]
+            masks.append(mask_2d)
+        return torch.stack(masks, dim=0).unsqueeze(1)  # [batch, 1, q_len, kv_len]
+
+    _orig_dispatch = _mu.ALL_MASK_ATTENTION_FUNCTIONS.get("sdpa")
+    _orig_sdpa_mask = getattr(_mu, "sdpa_mask", None)
+    _mu.ALL_MASK_ATTENTION_FUNCTIONS["sdpa"] = _no_vmap
+    if _orig_sdpa_mask is not None:
+        _mu.sdpa_mask = _no_vmap
+
+    try:
+        yield
+    finally:
+        if _orig_dispatch is not None:
+            _mu.ALL_MASK_ATTENTION_FUNCTIONS["sdpa"] = _orig_dispatch
+        if _orig_sdpa_mask is not None:
+            _mu.sdpa_mask = _orig_sdpa_mask
 
 
 def require_ram(required_bytes: int, label: str) -> None:

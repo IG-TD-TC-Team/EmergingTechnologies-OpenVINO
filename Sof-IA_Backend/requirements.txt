@@ -1,25 +1,31 @@
 # ── Core OpenVINO ────────────────────────────────────────────────────────────
-openvino>=2024.3.0
-openvino-genai>=2024.3.0
-optimum-intel[openvino]>=1.18.0
+# Pinned to 2026.1.x (compatible release).  OV 2026.1.0 has breaking API
+# changes versus 2024.x (GQA stateful KV-cache bug, vmap not traceable, negative
+# cat dims rejected).  All workarounds in this codebase target 2026.1.0 exactly;
+# do NOT widen to >=2024.3.0 without re-testing every export path.
+openvino~=2026.1.0
+openvino-genai~=2026.1.0
+optimum-intel[openvino]~=1.27.0
+nncf~=3.1.0                # INT8/INT4 weight quantisation; 3.x changed group_size behaviour
 
 # ── Models & Inference ───────────────────────────────────────────────────────
-transformers>=4.40.0
-torch>=2.2.0                  # CPU-only install: pip install torch --index-url https://download.pytorch.org/whl/cpu
+transformers>=4.50.0        # ≥4.50 required for sdpa_mask_recent_torch / masking_utils
+torch>=2.2.0                # CPU-only install: pip install torch --index-url https://download.pytorch.org/whl/cpu
 accelerate>=0.28.0
 sentencepiece>=0.2.0
 
 # ── Audio ────────────────────────────────────────────────────────────────────
 soundfile>=0.12.0
-sounddevice>=0.4.6        # Real-time audio capture from microphone
-pydub>=0.25.1             # WebM/Opus and M4A/AAC decoding (requires ffmpeg on PATH)
+sounddevice>=0.4.6          # Real-time audio capture from microphone
+pydub>=0.25.1               # WebM/Opus and M4A/AAC decoding (requires ffmpeg on PATH)
 
 # ── Benchmarking & Metrics ───────────────────────────────────────────────────
-psutil>=5.9.0         # Memory / CPU monitoring
+psutil>=5.9.0               # Memory / CPU monitoring
 numpy>=1.26.0
 
 # ── Web Server ───────────────────────────────────────────────────────────────
 fastapi>=0.111.0
 uvicorn[standard]>=0.29.0
+python-multipart>=0.0.9     # Required by FastAPI for file-upload endpoints (UploadFile / Form)
 pydantic>=2.0.0
 PyYAML>=6.0.0

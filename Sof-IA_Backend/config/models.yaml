@@ -38,7 +38,7 @@ models:
     model_path: models/apertus-8b-pytorch
     hub_id: swiss-ai/Apertus-8B-Instruct-2509
     max_new_tokens: 512
-    chat_format: llama3
+    chat_format: apertus
   apertus_openvino:
     enabled: true
     type: slm
@@ -48,7 +48,7 @@ models:
     model_path: models/apertus-8b-int4
     hub_id: swiss-ai/Apertus-8B-Instruct-2509
     max_new_tokens: 512
-    chat_format: llama3
+    chat_format: apertus
   whisper_pytorch:
     enabled: true
     type: asr
@@ -72,7 +72,7 @@ models:
     model_path: models/qwen2.5-1.5b-int8-pytorch
     hub_id: Qwen/Qwen2.5-1.5B-Instruct
     max_new_tokens: 512
-    chat_format: llama3
+    chat_format: qwen
   qwen2_5_1_5b_int8:
     enabled: true
     type: slm
@@ -81,7 +81,8 @@ models:
     model_path: models/qwen2.5-1.5b-int8
     hub_id: Qwen/Qwen2.5-1.5B-Instruct
     max_new_tokens: 512
-    chat_format: llama3
+    compression: int8
+    chat_format: qwen
   qwen2_5_7b_int4:
     enabled: true
     type: slm
@@ -90,4 +91,57 @@ models:
     model_path: models/qwen2.5-7b-int4
     hub_id: Qwen/Qwen2.5-7B-Instruct
     max_new_tokens: 512
+    compression: int4
+    chat_format: qwen
+  phi3_mini_4k_int8_pytorch:
+    enabled: true
+    type: slm
+    class: src.slm.generic_pytorch.GenericSLMPyTorch
+    label: Phi-3 Mini 4k — PyTorch FP32
+    model_path: models/phi3-mini-4k-int8-pytorch
+    hub_id: microsoft/Phi-3-mini-4k-instruct
+    max_new_tokens: 256
+    chat_format: phi3
+  apertus_8b_int4:
+    enabled: true
+    type: slm
+    class: src.slm.apertus_openvino.ApertusOpenVINO
+    label: Apertus 8B — OpenVINO INT4
+    model_path: models/apertus-8b-int4
+    hub_id: swiss-ai/Apertus-8B-Instruct-2509
+    max_new_tokens: 512
+    chat_format: apertus
+  qwen2_5_3b_int8:
+    enabled: true
+    type: slm
+    class: src.slm.generic_openvino.GenericSLMOpenVINO
+    label: Qwen 2.5 3B — OpenVINO INT8
+    model_path: models/qwen2.5-3b-int8
+    hub_id: Qwen/Qwen2.5-3B-Instruct
+    max_new_tokens: 512
+    compression: int8
+    chat_format: qwen
+  whisper_tiny_ov:
+    enabled: true
+    type: asr
+    class: src.asr.whisper_openvino.WhisperOpenVINO
+    label: Whisper Tiny — OpenVINO INT8
+    model_path: models/whisper-tiny-ov
+    hub_id: openai/whisper-tiny
+  whisper_large_ov:
+    enabled: true
+    type: asr
+    class: src.asr.whisper_openvino.WhisperOpenVINO
+    label: Whisper Large v2 — OpenVINO INT8
+    model_path: models/whisper-large-ov
+    hub_id: openai/whisper-large-v2
+  llama_3_2_1b_int8:
+    enabled: true
+    type: slm
+    class: src.slm.generic_openvino.GenericSLMOpenVINO
+    label: LLaMA 3.2 1B — OpenVINO INT8
+    model_path: models/llama-3.2-1b-int8
+    hub_id: meta-llama/Llama-3.2-1B-Instruct
+    max_new_tokens: 512
+    compression: int8
     chat_format: llama3

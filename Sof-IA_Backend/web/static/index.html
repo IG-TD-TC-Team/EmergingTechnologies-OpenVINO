@@ -6,7 +6,7 @@
   <title>OpenVino Benchmark Dashboard</title>
   <script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.prod.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-  <link rel="stylesheet" href="/static/app.css?v=6" />
+  <link rel="stylesheet" href="/static/app.css?v=7" />
   <!--
     Script load order matters in CDN (non-module) mode:
       1. Vue + Chart.js globals
@@ -67,10 +67,8 @@
 
         <label>Model</label>
         <select v-model="run.modelId" :disabled="run.running" @change="onModelChange">
-          <option v-if="models.length === 0" value="" disabled>Loading…</option>
-          <option v-for="m in models" :key="m.id" :value="m.id" :disabled="!m.enabled">
-            {{ m.label }}{{ !m.enabled ? ' (disabled)' : '' }}
-          </option>
+          <option v-if="readyModels.length === 0" value="" disabled>No models on disk — download one in the Models tab</option>
+          <option v-for="m in readyModels" :key="m.id" :value="m.id">{{ m.label }}</option>
         </select>
         <div v-if="selectedModel" class="hint">
           Type:
@@ -405,7 +403,7 @@
 
         <label>Model</label>
         <select v-model="chat.modelId.value" :disabled="chat.busy.value">
-          <option v-if="slmModels.length === 0" value="" disabled>No enabled SLMs</option>
+          <option v-if="slmModels.length === 0" value="" disabled>No SLMs on disk — download one in the Models tab</option>
           <option v-for="m in slmModels" :key="m.id" :value="m.id">{{ m.label }}</option>
         </select>
 
@@ -471,7 +469,7 @@
 
         <label>Model</label>
         <select v-model="asr.modelId.value" :disabled="asr.busy.value">
-          <option v-if="asrModels.length === 0" value="" disabled>No enabled ASR models</option>
+          <option v-if="asrModels.length === 0" value="" disabled>No ASR models on disk — download one in the Models tab</option>
           <option v-for="m in asrModels" :key="m.id" :value="m.id">{{ m.label }}</option>
         </select>
 
@@ -762,16 +760,16 @@
 
 </div>
 
-<script src="/static/api.js?v=6"></script>
-<script src="/static/composables/models.js?v=6"></script>
-<script src="/static/composables/benchmark.js?v=6"></script>
-<script src="/static/composables/history.js?v=6"></script>
-<script src="/static/composables/compare.js?v=6"></script>
-<script src="/static/composables/chart.js?v=6"></script>
-<script src="/static/composables/logs.js?v=6"></script>
-<script src="/static/composables/chat.js?v=6"></script>
-<script src="/static/composables/catalogue.js?v=6"></script>
-<script src="/static/composables/transcription.js?v=6"></script>
-<script src="/static/app.js?v=6"></script>
+<script src="/static/api.js?v=7"></script>
+<script src="/static/composables/models.js?v=7"></script>
+<script src="/static/composables/benchmark.js?v=7"></script>
+<script src="/static/composables/history.js?v=7"></script>
+<script src="/static/composables/compare.js?v=7"></script>
+<script src="/static/composables/chart.js?v=7"></script>
+<script src="/static/composables/logs.js?v=7"></script>
+<script src="/static/composables/chat.js?v=7"></script>
+<script src="/static/composables/catalogue.js?v=7"></script>
+<script src="/static/composables/transcription.js?v=7"></script>
+<script src="/static/app.js?v=7"></script>
 </body>
 </html>

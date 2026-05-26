@@ -97,6 +97,11 @@ def add_model_to_yaml(entry: dict, compression: str) -> None:
 
     if entry["type"] == "slm":
         new_entry["max_new_tokens"] = entry.get("max_new_tokens", 512)
+        # Persist compression so ModelFactory can pass it to the constructor.
+        # Only written for GenericSLMOpenVINO, which is the only class that
+        # accepts a ``compression`` kwarg.
+        if "GenericSLMOpenVINO" in entry.get("model_class", ""):
+            new_entry["compression"] = compression
         if entry.get("chat_format"):
             new_entry["chat_format"] = entry["chat_format"]
 

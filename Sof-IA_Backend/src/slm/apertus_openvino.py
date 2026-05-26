@@ -166,6 +166,13 @@ class ApertusOpenVINO(StreamingSLMBase):
             self.model_path,
             ov_config=ov_thread_config(),
             trust_remote_code=True,
+            # stateful=False: the Apertus export uses explicit past_key_values I/O
+            # (stateful=False during export).  Passing stateful=False here prevents
+            # OVModelForCausalLM from auto-converting the stateless model to stateful
+            # on the fly.  Apertus is a GQA model (32 Q / 8 KV heads), and OV 2026.x
+            # ScaledDotProductAttentionWithKVCache has an attention-mask shape bug
+            # for GQA that would cause a RuntimeError at the first generate() call.
+            stateful=False,
         )
 
     # ------------------------------------------------------------------
@@ -174,13 +181,17 @@ class ApertusOpenVINO(StreamingSLMBase):
 
     def _export(self, local_path: Path) -> None:
         """Three-tier export strategy (see class docstring)."""
+        # group_size=128 (AWQ/GPTQ standard) keeps each NNCF quantization step to
+        # 128 elements, preventing the OOM that occurs with group_size=-1 (per-channel)
+        # when NNCF's OV Divide node tries to allocate the full ~2 GB embedding matrix
+        # [128256 × 4096 × float32] in a single contiguous block.
         quant_config = (
-            OVWeightQuantizationConfig(bits=4, sym=True, ratio=1.0, group_size=-1)
+            OVWeightQuantizationConfig(bits=4, sym=True, ratio=1.0, group_size=128)
             if _QUANT_CONFIG_AVAILABLE
             else None
         )
         if quant_config:
-            self._report("quantization: INT4 sym per-channel (OVWeightQuantizationConfig)")
+            self._report("quantization: INT4 sym group_size=128 (OVWeightQuantizationConfig)")
         else:
             self._report(
                 "OVWeightQuantizationConfig not available — "
@@ -737,15 +748,53 @@ class ApertusOpenVINO(StreamingSLMBase):
         gc.collect()
 
         import nncf
+        import re as _re
 
         if quant_config is not None:
-            self._report("FX+KV export: applying NNCF INT4 sym compression")
-            ov_model = nncf.compress_weights(
-                ov_model,
-                mode=nncf.CompressWeightsMode.INT4_SYM,
-                ratio=1.0,
-                group_size=-1,
-            )
+            self._report("FX+KV export: applying NNCF INT4 sym group_size=128 compression")
+            try:
+                ov_model = nncf.compress_weights(
+                    ov_model,
+                    mode=nncf.CompressWeightsMode.INT4_SYM,
+                    ratio=1.0,
+                    group_size=128,  # 128-element groups avoid OOM on large vocab embeddings
+                )
+            except Exception as exc:
+                exc_s = str(exc)
+                if "group size" in exc_s.lower() or "group-wise" in exc_s.lower():
+                    # NNCF 3.x raises InvalidGroupSizeError for nodes whose channel
+                    # dimension is smaller than group_size (e.g. bmm with channel=1).
+                    # group_size_fallback_mode exists as an enum but is NOT a valid
+                    # compress_weights parameter in NNCF 3.1.0. Workaround: parse the
+                    # failing node names from the error and exclude them via IgnoredScope,
+                    # so all other layers still get INT4 compression.
+                    failing = _re.findall(r'"([^"]+)"', exc_s)
+                    self._report(
+                        f"group_size=128 incompatible for {failing} (channel_size < 128) "
+                        "— retrying with those nodes in ignored_scope"
+                    )
+                    retry_kwargs = (
+                        {"ignored_scope": nncf.IgnoredScope(names=failing)}
+                        if failing else {}
+                    )
+                    ov_model = nncf.compress_weights(
+                        ov_model,
+                        mode=nncf.CompressWeightsMode.INT4_SYM,
+                        ratio=1.0,
+                        group_size=128,
+                        **retry_kwargs,
+                    )
+                elif "allocate" in exc_s.lower() or "memory" in exc_s.lower():
+                    self._report(
+                        f"INT4 compression OOM ({exc_s[:120]}) — "
+                        "falling back to INT8 sym compression"
+                    )
+                    ov_model = nncf.compress_weights(
+                        ov_model,
+                        mode=nncf.CompressWeightsMode.INT8_SYM,
+                    )
+                else:
+                    raise
         else:
             self._report(
                 "FX+KV export: OVWeightQuantizationConfig unavailable — "
@@ -862,16 +911,48 @@ class ApertusOpenVINO(StreamingSLMBase):
         # Import nncf only now — after the PyTorch model is gone — to avoid
         # its import-time patches conflicting with the Apertus model loader.
         import nncf
+        import re as _re
 
         # INT4 weight compression via NNCF (weight-only, no calibration data needed).
         if quant_config is not None:
-            self._report("applying NNCF INT4 sym weight compression")
-            ov_model = nncf.compress_weights(
-                ov_model,
-                mode=nncf.CompressWeightsMode.INT4_SYM,
-                ratio=1.0,
-                group_size=-1,
-            )
+            self._report("applying NNCF INT4 sym group_size=128 weight compression")
+            try:
+                ov_model = nncf.compress_weights(
+                    ov_model,
+                    mode=nncf.CompressWeightsMode.INT4_SYM,
+                    ratio=1.0,
+                    group_size=128,  # 128-element groups avoid OOM on large vocab embeddings
+                )
+            except Exception as exc:
+                exc_s = str(exc)
+                if "group size" in exc_s.lower() or "group-wise" in exc_s.lower():
+                    failing = _re.findall(r'"([^"]+)"', exc_s)
+                    self._report(
+                        f"group_size=128 incompatible for {failing} (channel_size < 128) "
+                        "— retrying with those nodes in ignored_scope"
+                    )
+                    retry_kwargs = (
+                        {"ignored_scope": nncf.IgnoredScope(names=failing)}
+                        if failing else {}
+                    )
+                    ov_model = nncf.compress_weights(
+                        ov_model,
+                        mode=nncf.CompressWeightsMode.INT4_SYM,
+                        ratio=1.0,
+                        group_size=128,
+                        **retry_kwargs,
+                    )
+                elif "allocate" in exc_s.lower() or "memory" in exc_s.lower():
+                    self._report(
+                        f"INT4 compression OOM ({exc_s[:120]}) — "
+                        "falling back to INT8 sym compression"
+                    )
+                    ov_model = nncf.compress_weights(
+                        ov_model,
+                        mode=nncf.CompressWeightsMode.INT8_SYM,
+                    )
+                else:
+                    raise
         else:
             self._report("NNCF INT4 unavailable — saving uncompressed OV IR (INT8 via nncf)")
             ov_model = nncf.compress_weights(
@@ -895,6 +976,8 @@ class ApertusOpenVINO(StreamingSLMBase):
         outputs = self._model.generate(
             **inputs, max_new_tokens=self.max_new_tokens, do_sample=False,
             repetition_penalty=1.1,
+            eos_token_id=self._tokenizer.eos_token_id,   # stop at <|assistant_end|>
+            pad_token_id=self._tokenizer.eos_token_id,
         )
         n_new_tokens = outputs.shape[-1] - n_input_tokens
         text = self._tokenizer.decode(
@@ -914,6 +997,8 @@ class ApertusOpenVINO(StreamingSLMBase):
             "do_sample": False,
             "repetition_penalty": 1.1,
             "streamer": streamer,
+            "eos_token_id": self._tokenizer.eos_token_id,   # stop at <|assistant_end|>
+            "pad_token_id": self._tokenizer.eos_token_id,
         }
         thread = threading.Thread(target=self._model.generate, kwargs=gen_kwargs)
         thread.start()

@@ -10,7 +10,7 @@
 
 Sof-IA is an ambient scribe application for nurses that runs entirely on-premise — no cloud, no GPU required. A nurse speaks at the bedside; the system continuously captures audio, transcribes it with **Whisper (OpenVINO INT8)**, and extracts structured clinical data with **Phi-3 Mini (OpenVINO INT8)**. The results appear as live cards in a React Native mobile app.
 
-The project also includes a **benchmarking framework** that measures and compares PyTorch CPU vs OpenVINO INT8 inference across Whisper, Phi-3 Mini, and Apertus 8B — validating the performance case for OpenVINO on Intel CPU hospital hardware.
+The project also includes a **benchmarking framework** that measures and compares PyTorch CPU vs OpenVINO INT8 inference across Whisper, Phi-3 Mini, and Apertus 8B — validating the performance case for OpenVINO on Intel CPU hardware.
 
 ---
 
@@ -47,6 +47,8 @@ py -3.12 -m venv .venv
 pip install -r requirements.txt
 
 # Convert models — downloads from HuggingFace, runs once
+# Note: convert_phi3.py uses main_export with an explicit OVWeightQuantizationConfig
+# to avoid a core.read_model() crash ("stoll argument out of range") in OpenVINO ≥2025.
 python scripts/convert_whisper.py --model medium
 python scripts/convert_phi3.py
 ```
@@ -96,7 +98,7 @@ npx expo start
 ### Shared infrastructure
 | Technology | Role |
 |-----------|------|
-| **OpenVINO 2024.x** | Intel inference optimization — INT8/INT4 quantization, graph optimization |
+| **OpenVINO 2026.x** | Intel inference optimization — INT8/INT4 quantization, graph optimization |
 | **optimum-intel** | HuggingFace bridge for OpenVINO model export and inference |
 | **NNCF** | Neural Network Compression Framework — INT8/INT4 weight quantization |
 | **PyTorch** | Baseline inference framework (used in both benchmark and pipeline) |

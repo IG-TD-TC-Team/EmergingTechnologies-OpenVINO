@@ -17,7 +17,7 @@ class TranscriptionSegment:
 
     Similar to a sentence or phrase in the transcription.
     WHY DATACLASS: Automatic __init__, __repr__, __eq__ generation
-    (like Kotlin data class or Java record)
+    (like Java record)
     """
     text: str
     start: float  # seconds
@@ -53,7 +53,7 @@ class ASRModel(ABC):
     - All share same interface
     - Easily swappable in pipeline
 
-    Similar to Java interface or C# abstract class.
+    Similar to Java interface.
 
     REQUIRED METHODS (must be implemented):
     - load() - Load model into memory (one-line core logic)
